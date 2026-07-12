@@ -29,11 +29,6 @@ echo "Current Directory:"
 pwd
  
 echo
-echo "Environment Variable"
-export STUDENT_HOME=$(pwd)
-echo $STUDENT_HOME
- 
-echo
 echo "Students Who Passed"
 awk -F',' '$3>=50 {print $2,"-",$3}' input/students.txt
  
