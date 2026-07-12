@@ -1,0 +1,5 @@
+101 Linux 5
+102 Python 8
+103 Java 3
+104 DataScience 6
+105 Networking 2
