@@ -1,26 +1,39 @@
 # tests/test_patient.py
-import unittest
 from models.patient import Patient
 from services.patient_service import PatientService
 
-class TestPatientService(unittest.TestCase):
-    def setUp(self):
-        self.datastore = {"patients": {}, "doctors": {}, "appointments": {}} 
-        self.service = PatientService(self.datastore)
+# Tests Patient CRUD operations 
+def test_create_and_read_patient():
+    datastore = {"patients": {}, "doctors": {}, "appointments": {}} 
+    service = PatientService(datastore)
+    
+    p = Patient(1, "John Doe", 30, "Flu")
+    service.add_patient(p) 
+    
+    # Read and verify details 
+    info = service.get_patient(1)
+    assert info is not None
+    assert "John Doe" in info
+    assert "Flu" in info
 
-    def test_patient_crud(self):
-        # Create and Read 
-        p = Patient(1, "John Doe", 30, "Flu")
-        self.service.add_patient(p)
-        self.assertIn("John Doe", self.service.get_patient(1))
-        
-        # Update 
-        self.service.update_patient(1, "Recovered")
-        self.assertEqual(self.datastore["patients"][1].ailment, "Recovered")
-        
-        # Delete 
-        self.service.delete_patient(1)
-        self.assertIsNone(self.service.get_patient(1))
+def test_update_patient():
+    datastore = {"patients": {}, "doctors": {}, "appointments": {}} 
+    service = PatientService(datastore)
+    
+    p = Patient(1, "John Doe", 30, "Flu")
+    service.add_patient(p) 
+    
+    # Update ailment and assert change 
+    service.update_patient(1, "Recovered")
+    assert datastore["patients"][1].ailment == "Recovered"
 
-if __name__ == '__main__':
-    unittest.main()
+def test_delete_patient():
+    datastore = {"patients": {}, "doctors": {}, "appointments": {}} 
+    service = PatientService(datastore)
+    
+    p = Patient(1, "John Doe", 30, "Flu")
+    service.add_patient(p) 
+    
+    # Delete and assert removal 
+    service.delete_patient(1)
+    assert service.get_patient(1) is None
