@@ -1,26 +1,39 @@
 # tests/test_doctor.py
-import unittest
 from models.doctor import Doctor
 from services.doctor_service import DoctorService
 
-class TestDoctorService(unittest.TestCase):
-    def setUp(self):
-        self.datastore = {"patients": {}, "doctors": {}, "appointments": {}} 
-        self.service = DoctorService(self.datastore)
+# Tests Doctor CRUD operations 
+def test_create_and_read_doctor():
+    datastore = {"patients": {}, "doctors": {}, "appointments": {}} 
+    service = DoctorService(datastore)
+    
+    d = Doctor(101, "Dr. Alice", 45, "Cardiology")
+    service.add_doctor(d) 
+    
+    # Read and verify details 
+    info = service.get_doctor(101)
+    assert info is not None
+    assert "Dr. Alice" in info
+    assert "Cardiology" in info
 
-    def test_doctor_crud(self):
-        # Create and Read 
-        d = Doctor(101, "Dr. Alice", 45, "Cardiology")
-        self.service.add_doctor(d)
-        self.assertIn("Cardiology", self.service.get_doctor(101))
-        
-        # Update 
-        self.service.update_doctor(101, "Neurology")
-        self.assertEqual(self.datastore["doctors"][101].specialization, "Neurology")
-        
-        # Delete 
-        self.service.delete_doctor(101)
-        self.assertIsNone(self.service.get_doctor(101))
+def test_update_doctor():
+    datastore = {"patients": {}, "doctors": {}, "appointments": {}} 
+    service = DoctorService(datastore)
+    
+    d = Doctor(101, "Dr. Alice", 45, "Cardiology")
+    service.add_doctor(d) 
+    
+    # Update specialization and assert change 
+    service.update_doctor(101, "Neurology")
+    assert datastore["doctors"][101].specialization == "Neurology"
 
-if __name__ == '__main__':
-    unittest.main()
+def test_delete_doctor():
+    datastore = {"patients": {}, "doctors": {}, "appointments": {}} 
+    service = DoctorService(datastore)
+    
+    d = Doctor(101, "Dr. Alice", 45, "Cardiology")
+    service.add_doctor(d) 
+    
+    # Delete and assert removal 
+    service.delete_doctor(101)
+    assert service.get_doctor(101) is None
