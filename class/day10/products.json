@@ -1,0 +1,42 @@
+[
+    {
+        "id": 101,
+        "name": "Laptop",
+        "category": "Electronics",
+        "price": 55000,
+        "quantity": 1,
+        "inStock": true
+    },
+    {
+        "id": 102,
+        "name": "Wireless Mouse",
+        "category": "Electronics",
+        "price": 1200,
+        "quantity": 2,
+        "inStock": true
+    },
+    {
+        "id": 103,
+        "name": "Office Chair",
+        "category": "Furniture",
+        "price": 8500,
+        "quantity": 1,
+        "inStock": false
+    },
+    {
+        "id": 104,
+        "name": "Notebook",
+        "category": "Stationery",
+        "price": 120,
+        "quantity": 5,
+        "inStock": true
+    },
+    {
+        "id": 105,
+        "name": "Water Bottle",
+        "category": "Accessories",
+        "price": 450,
+        "quantity": 3,
+        "inStock": true
+    }
+]
