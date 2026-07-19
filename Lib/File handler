@@ -1,0 +1,21 @@
+import os
+from exceptions.custom_exceptions import FileNotFoundException
+
+BOOKS_FILE = "data/books.csv"
+MEMBERS_FILE = "data/members.csv"
+
+def ensure_data_dir():
+    os.makedirs("data", exist_ok=True)
+
+def read_data(filepath):
+    if not os.path.exists(filepath):
+        raise FileNotFoundException("Error: Data file not found.")
+    
+    with open(filepath, 'r') as file:
+        return [line.strip().split(',') for line in file.readlines() if line.strip()]
+
+def write_data(filepath, data_objects):
+    ensure_data_dir()
+    with open(filepath, 'w') as file:
+        for obj in data_objects:
+            file.write(obj.to_csv_string())
