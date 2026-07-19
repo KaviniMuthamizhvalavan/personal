@@ -1,0 +1,89 @@
+import unittest
+import os
+from services.library_service import LibraryService
+from exceptions.custom_exceptions import *
+from utils import file_handler
+
+class TestLibrarySystem(unittest.TestCase):
+    def setUp(self):
+        """Precondition setup for tests."""
+        self.service = LibraryService()
+        file_handler.BOOKS_FILE = "data/test_books.csv"
+        file_handler.MEMBERS_FILE = "data/test_members.csv"
+        file_handler.ensure_data_dir()
+        
+        # Clear files before each test
+        open(file_handler.BOOKS_FILE, 'w').close()
+        open(file_handler.MEMBERS_FILE, 'w').close()
+        
+        # Add initial data
+        self.service.add_book("101", "Python Programming", "John Smith", "Programming")
+        self.service.register_member("M001", "Ravi Kumar", "ravi@gmail.com")
+
+    def tearDown(self):
+        """Clean up test files."""
+        if os.path.exists(file_handler.BOOKS_FILE):
+            os.remove(file_handler.BOOKS_FILE)
+        if os.path.exists(file_handler.MEMBERS_FILE):
+            os.remove(file_handler.MEMBERS_FILE)
+
+    def test_tc01_view_books(self):
+        # View all books
+        books = self.service._get_books()
+        self.assertEqual(len(books), 1)
+        self.assertEqual(books[0].book_id, "101")
+
+    def test_tc02_add_book(self):
+        # Add new book
+        self.service.add_book("102", "Data Science", "Jane Miller", "DS")
+        books = self.service._get_books()
+        self.assertEqual(len(books), 2)
+
+    def test_tc03_register_member(self):
+        # Register new member
+        self.service.register_member("M002", "Alice", "alice@test.com")
+        members = self.service._get_members()
+        self.assertEqual(len(members), 2)
+
+    def test_tc04_borrow_book_valid(self):
+        # Borrow available book
+        self.service.borrow_book("M001", "101")
+        book = self.service._get_books()[0]
+        self.assertEqual(book.status, "Borrowed")
+
+    def test_tc05_borrow_book_already_borrowed(self):
+        # Borrow already borrowed book
+        self.service.borrow_book("M001", "101")
+        with self.assertRaises(BookAlreadyBorrowedException):
+            self.service.borrow_book("M001", "101")
+
+    def test_tc06_borrow_book_invalid_book_id(self):
+        # Borrow non-existent book
+        with self.assertRaises(BookNotFoundException):
+            self.service.borrow_book("M001", "999")
+
+    def test_tc07_borrow_book_invalid_member_id(self):
+        # Borrow with non-existent member
+        with self.assertRaises(MemberNotFoundException):
+            self.service.borrow_book("M999", "101")
+
+    def test_tc08_return_book_valid(self):
+        # Return a borrowed book
+        self.service.borrow_book("M001", "101")
+        self.service.return_book("M001", "101")
+        book = self.service._get_books()[0]
+        self.assertEqual(book.status, "Available")
+
+    def test_tc09_return_book_not_borrowed(self):
+        # Return a book the member didn't borrow
+        with self.assertRaises(BookNotBorrowedByMemberException):
+            self.service.return_book("M001", "101")
+
+    def test_tc10_data_file_missing(self):
+        # Trigger FileNotFound
+        os.remove(file_handler.BOOKS_FILE)
+        with self.assertRaises(FileNotFoundException):
+            self.service.view_books()
+
+if __name__ == "__main__":
+    unittest.main()
