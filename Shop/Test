@@ -1,0 +1,39 @@
+import pytest
+from models.product import Product
+from models.cart import Cart
+from exceptions.cart_exceptions import OutOfStockError
+
+def test_add_product():
+    # Setup
+    laptop = Product("Laptop", 1000, 5)
+    cart = Cart()
+    
+    # Action
+    cart.add_product(laptop, 1)
+    
+    # Assert
+    assert len(cart.items) == 1
+    assert cart.items["Laptop"]['qty'] == 1
+    assert laptop.quantity == 4
+
+def test_add_product_out_of_stock():
+    # Setup
+    laptop = Product("Laptop", 1000, 1)
+    cart = Cart()
+    
+    # Action & Assert
+    with pytest.raises(OutOfStockError):
+        cart.add_product(laptop, 2)
+
+def test_remove_product():
+    # Setup
+    laptop = Product("Laptop", 1000, 5)
+    cart = Cart()
+    cart.add_product(laptop, 1)
+    
+    # Action
+    cart.remove_product("Laptop")
+    
+    # Assert
+    assert len(cart.items) == 0
+    assert "Laptop" not in cart.items
