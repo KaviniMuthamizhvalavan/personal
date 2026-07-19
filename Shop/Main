@@ -1,0 +1,21 @@
+from models.product import Product
+from models.user import User
+from services.store_service import StoreService
+
+def main():
+    # Store service managing inventory
+    store = StoreService()
+    store.add_product("Laptop", 1000, 5)
+    
+    # Create products and users
+    laptop = store.get_product("Laptop")
+    user = User("Alice")
+    
+    # Add/remove items from cart
+    user.cart.add_product(laptop, 1)
+    
+    # Display cart details
+    print(f"{user.name}'s Cart Details:", user.cart.view_cart())
+
+if __name__ == "__main__":
+    main()
