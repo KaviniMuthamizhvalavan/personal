@@ -1,0 +1,62 @@
+from services.library_service import LibraryService
+from exceptions.custom_exceptions import *
+from utils.file_handler import ensure_data_dir
+
+def main():
+    service = LibraryService()
+    ensure_data_dir()
+    
+    while True:
+        print("\n===== Library Management System =====")
+        print("1. View Books")
+        print("2. Add Book")
+        print("3. Register Member")
+        print("4. Borrow Book")
+        print("5. Return Book")
+        print("6. Exit")
+        
+        choice = input("Enter your choice: ")
+        
+        try:
+            if choice == '1':
+                service.view_books()
+            
+            elif choice == '2':
+                b_id = input("Enter Book ID: ")
+                title = input("Enter Title: ")
+                author = input("Enter Author: ")
+                category = input("Enter Category: ")
+                service.add_book(b_id, title, author, category)
+            
+            elif choice == '3':
+                m_id = input("Enter Member ID: ")
+                name = input("Enter Member Name: ")
+                email = input("Enter Email: ")
+                service.register_member(m_id, name, email)
+            
+            elif choice == '4':
+                m_id = input("Enter Member ID: ")
+                b_id = input("Enter Book ID: ")
+                service.borrow_book(m_id, b_id)
+            
+            elif choice == '5':
+                m_id = input("Enter Member ID: ")
+                b_id = input("Enter Book ID: ")
+                service.return_book(m_id, b_id)
+            
+            elif choice == '6':
+                print("Thank you for using the Library Management System.")
+                break
+            
+            else:
+                print("Invalid choice. Please try again.")
+
+        except (FileNotFoundException, MemberNotFoundException, 
+                BookNotFoundException, BookAlreadyBorrowedException, 
+                BookNotBorrowedByMemberException) as e:
+            print(e)
+        except Exception as e:
+            print(f"An unexpected error occurred: {e}")
+
+if __name__ == "__main__":
+    main()
