@@ -1,0 +1,91 @@
+class OutOfStockError(Exception):
+    pass
+
+class ProductNotFoundError(Exception):
+    pass
+class Product:
+    def __init__(self, name: str, price: float, quantity: int):
+        self.name = name
+        self.price = price
+        self.quantity = quantity
+from exceptions.cart_exceptions import OutOfStockError
+
+class Cart:
+    def __init__(self):
+        # Stores items added by users
+        self.items = {}
+
+    def add_product(self, product, quantity: int):
+        if product.quantity < quantity:
+            raise OutOfStockError(f"Only {product.quantity} units of {product.name} available.")
+        
+        if product.name in self.items:
+            self.items[product.name]['qty'] += quantity
+        else:
+            self.items[product.name] = {'product': product, 'qty': quantity}
+        
+        product.quantity -= quantity
+
+    def remove_product(self, product_name: str):
+        if product_name in self.items:
+            del self.items[product_name]
+
+    def view_cart(self):
+        return {name: item_info['qty'] for name, item_info in self.items.items()}
+
+
+from models.cart import Cart
+
+class User:
+    def __init__(self, name: str):
+        self.name = name
+        self.cart = Cart()
+
+from models.user import User
+
+class PremiumUser(User):
+    def __init__(self, name: str, discount_rate: float = 0.10):
+        super().__init__(name)
+        self.discount_rate = discount_rate
+
+from models.product import Product
+from exceptions.cart_exceptions import ProductNotFoundError
+
+class StoreService:
+    def __init__(self):
+        self.inventory = {}
+
+    def add_product(self, name: str, price: float, quantity: int):
+        self.inventory[name] = Product(name, price, quantity)
+
+    def get_product(self, name: str):
+        if name not in self.inventory:
+            raise ProductNotFoundError(f"Product '{name}' not found in store.")
+        return self.inventory[name]
+
+from utils.file_handler import save_order
+
+class CartService:
+    @staticmethod
+    def checkout(user):
+        if not user.cart.items:
+            return False
+        
+        # Saves the order via the utility function
+        save_order(user.cart)
+        # Clear cart after successful checkout
+        user.cart.items = {}
+        return True
+
+import os
+
+def save_order(cart):
+    # Ensure data directory exists
+    os.makedirs("data", exist_ok=True)
+    
+    with open("data/order_history.txt", "a") as f:
+        f.write(str(cart.view_cart()) + "\n")
+
+
+
+
