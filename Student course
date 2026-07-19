@@ -1,0 +1,372 @@
+# exceptions/custom_exceptions.py
+
+class CourseNotFoundException(Exception):
+    pass
+
+class StudentNotFoundException(Exception):
+    pass
+
+class CourseFullException(Exception):
+    pass
+
+class FileDataNotFoundException(Exception):
+    pass
+# models/course.py
+
+class Course:
+    def __init__(self, course_id, course_name, instructor, seats_available):
+        self.course_id = course_id
+        self.course_name = course_name
+        self.instructor = instructor
+        self.seats_available = int(seats_available)
+
+    def decrease_seats(self):
+        if self.seats_available > 0:
+            self.seats_available -= 1
+            return True
+        return False
+
+    def increase_seats(self):
+        self.seats_available += 1
+
+    def __str__(self):
+        return (f"Course ID: {self.course_id}\n"
+                f"Course Name: {self.course_name}\n"
+                f"Instructor: {self.instructor}\n"
+                f"Seats Available: {self.seats_available}")
+
+
+# models/student.py
+
+class Student:
+    def __init__(self, student_id, name, email, enrolled_courses=None):
+        self.student_id = student_id
+        self.name = name
+        self.email = email
+        self.enrolled_courses = enrolled_courses if enrolled_courses else []
+
+    def enroll(self, course_id):
+        if course_id not in self.enrolled_courses:
+            self.enrolled_courses.append(course_id)
+
+    def drop(self, course_id):
+        if course_id in self.enrolled_courses:
+            self.enrolled_courses.remove(course_id)
+# utils/file_handler.py
+import csv
+import os
+from models.course import Course
+from models.student import Student
+from exceptions.custom_exceptions import FileDataNotFoundException
+
+class FileHandler:
+    @staticmethod
+    def load_courses(filepath):
+        if not os.path.exists(filepath):
+            raise FileDataNotFoundException("Error: Course data file not found")
+        courses = {}
+        with open(filepath, mode='r', newline='') as file:
+            reader = csv.DictReader(file)
+            for row in reader:
+                courses[row['course_id'].strip()] = Course(
+                    row['course_id'].strip(),
+                    row['course_name'].strip(),
+                    row['instructor'].strip(),
+                    row['seats_available'].strip()
+                )
+        return courses
+
+    @staticmethod
+    def save_courses(filepath, courses):
+        with open(filepath, mode='w', newline='') as file:
+            writer = csv.writer(file)
+            writer.writerow(['course_id', 'course_name', 'instructor', 'seats_available'])
+            for course in courses.values():
+                writer.writerow([course.course_id, course.course_name, course.instructor, course.seats_available])
+
+    @staticmethod
+    def load_students(filepath):
+        if not os.path.exists(filepath):
+            raise FileDataNotFoundException("Error: Student data file not found")
+        students = {}
+        with open(filepath, mode='r', newline='') as file:
+            reader = csv.DictReader(file)
+            for row in reader:
+                courses_str = row['enrolled_courses'].strip()
+                enrolled_courses = courses_str.split(';') if courses_str else []
+                students[row['student_id'].strip()] = Student(
+                    row['student_id'].strip(),
+                    row['name'].strip(),
+                    row['email'].strip(),
+                    enrolled_courses
+                )
+        return students
+
+    @staticmethod
+    def save_students(filepath, students):
+        with open(filepath, mode='w', newline='') as file:
+            writer = csv.writer(file)
+            writer.writerow(['student_id', 'name', 'email', 'enrolled_courses'])
+            for student in students.values():
+                courses_joined = ';'.join(student.enrolled_courses)
+                writer.writerow([student.student_id, student.name, student.email, courses_joined])
+# services/registration_service.py
+from utils.file_handler import FileHandler
+from models.course import Course
+from models.student import Student
+from exceptions.custom_exceptions import (
+    CourseNotFoundException, StudentNotFoundException, 
+    CourseFullException, FileDataNotFoundException
+)
+
+class RegistrationService:
+    def __init__(self, courses_file='data/courses.csv', students_file='data/students.csv'):
+        self.courses_file = courses_file
+        self.students_file = students_file
+
+    def get_all_courses(self):
+        return FileHandler.load_courses(self.courses_file)
+
+    def add_course(self, course_id, name, instructor, seats):
+        try:
+            courses = FileHandler.load_courses(self.courses_file)
+        except FileDataNotFoundException:
+            courses = {}
+        
+        courses[course_id] = Course(course_id, name, instructor, seats)
+        FileHandler.save_courses(self.courses_file, courses)
+
+    def register_student(self, student_id, name, email):
+        try:
+            students = FileHandler.load_students(self.students_file)
+        except FileDataNotFoundException:
+            students = {}
+            
+        students[student_id] = Student(student_id, name, email)
+        FileHandler.save_students(self.students_file, students)
+        return "Student registered successfully"
+
+    def enroll_course(self, student_id, course_id):
+        courses = FileHandler.load_courses(self.courses_file)
+        students = FileHandler.load_students(self.students_file)
+
+        if student_id not in students:
+            raise StudentNotFoundException("Error: Student not found")
+        if course_id not in courses:
+            raise CourseNotFoundException("Error: Course not found")
+        
+        course = courses[course_id]
+        student = students[student_id]
+
+        if course.seats_available <= 0:
+            raise CourseFullException("Enrollment failed: No seats available")
+        
+        if course_id in student.enrolled_courses:
+            return "Student already enrolled in this course."
+
+        course.decrease_seats()
+        student.enroll(course_id)
+
+        FileHandler.save_courses(self.courses_file, courses)
+        FileHandler.save_students(self.students_file, students)
+        
+        return "Course enrollment successful"
+
+    def drop_course(self, student_id, course_id):
+        courses = FileHandler.load_courses(self.courses_file)
+        students = FileHandler.load_students(self.students_file)
+
+        if student_id not in students:
+            raise StudentNotFoundException("Error: Student not found")
+        if course_id not in courses:
+            raise CourseNotFoundException("Error: Course not found")
+
+        course = courses[course_id]
+        student = students[student_id]
+
+        if course_id in student.enrolled_courses:
+            student.drop(course_id)
+            course.increase_seats()
+            FileHandler.save_courses(self.courses_file, courses)
+            FileHandler.save_students(self.students_file, students)
+            return "Course dropped successfully"
+        else:
+            return "Student is not enrolled in this course."
+# main.py
+import os
+from services.registration_service import RegistrationService
+from exceptions.custom_exceptions import (
+    CourseNotFoundException, StudentNotFoundException, 
+    CourseFullException, FileDataNotFoundException
+)
+
+def main():
+    service = RegistrationService()
+
+    # Ensure data directory exists
+    os.makedirs('data', exist_ok=True)
+    if not os.path.exists('data/courses.csv'):
+        with open('data/courses.csv', 'w') as f:
+            f.write("course_id,course_name,instructor,seats_available\n")
+    if not os.path.exists('data/students.csv'):
+        with open('data/students.csv', 'w') as f:
+            f.write("student_id,name,email,enrolled_courses\n")
+
+    while True:
+        print("\n===== Student Course Registration System =====")
+        print("1 View Courses")
+        print("2 Add Course")
+        print("3 Register Student")
+        print("4 Enroll Course")
+        print("5 Drop Course")
+        print("6 Exit")
+        
+        choice = input("Enter your choice: ")
+
+        try:
+            if choice == '1':
+                courses = service.get_all_courses()
+                for c in courses.values():
+                    print("-" * 20)
+                    print(c)
+            elif choice == '2':
+                c_id = input("Enter Course ID: ")
+                c_name = input("Enter Course Name: ")
+                inst = input("Enter Instructor: ")
+                seats = input("Enter Available Seats: ")
+                service.add_course(c_id, c_name, inst, seats)
+                print("Course added successfully.")
+            elif choice == '3':
+                s_id = input("Enter Student ID: ")
+                name = input("Enter Name: ")
+                email = input("Enter Email: ")
+                msg = service.register_student(s_id, name, email)
+                print(msg)
+            elif choice == '4':
+                s_id = input("Enter Student ID: ")
+                c_id = input("Enter Course ID: ")
+                msg = service.enroll_course(s_id, c_id)
+                print(msg)
+            elif choice == '5':
+                s_id = input("Enter Student ID: ")
+                c_id = input("Enter Course ID: ")
+                msg = service.drop_course(s_id, c_id)
+                print(msg)
+            elif choice == '6':
+                print("Exiting...")
+                break
+            else:
+                print("Invalid choice.")
+        except (CourseNotFoundException, StudentNotFoundException, 
+                CourseFullException, FileDataNotFoundException) as e:
+            print(str(e))
+
+if __name__ == "__main__":
+    main()
+# tests/test_registration.py
+import pytest
+import os
+from services.registration_service import RegistrationService
+from exceptions.custom_exceptions import (
+    CourseNotFoundException, StudentNotFoundException, 
+    CourseFullException, FileDataNotFoundException
+)
+
+@pytest.fixture
+def setup_files(tmp_path):
+    # Setup temporary CSV files with initial data
+    courses_file = tmp_path / "courses.csv"
+    students_file = tmp_path / "students.csv"
+    
+    courses_file.write_text("course_id,course_name,instructor,seats_available\n"
+                            "C101,Python Programming,Dr. Kumar,30\n"
+                            "C105,Database Systems,Dr. John,0\n")
+    
+    students_file.write_text("student_id,name,email,enrolled_courses\n"
+                             "S001,Ravi Kumar,ravi@gmail.com,\n"
+                             "S002,Meena Priya,meena@gmail.com,C101\n")
+                             
+    service = RegistrationService(str(courses_file), str(students_file))
+    return service, courses_file, students_file
+
+
+def test_tc01_view_available_courses(setup_files):
+    """TC01: View available courses[span_8](start_span)[span_8](end_span)"""
+    service, _, _ = setup_files
+    courses = service.get_all_courses()
+    
+    assert "C101" in courses
+    assert courses["C101"].course_name == "Python Programming"
+    assert courses["C101"].seats_available == 30
+
+def test_tc02_register_student(setup_files):
+    """TC02: Register a new student[span_9](start_span)[span_9](end_span)"""
+    service, _, _ = setup_files
+    msg = service.register_student("S999", "Test User", "test@gmail.com")
+    
+    assert msg == "Student registered successfully"
+    # Verify in file
+    students = service.FileHandler.load_students(service.students_file)
+    assert "S999" in students
+
+def test_tc03_enroll_student_success(setup_files):
+    """TC03: Enroll student in a course with seats[span_10](start_span)[span_10](end_span)"""
+    service, _, _ = setup_files
+    
+    # Pre-condition seats = 30
+    msg = service.enroll_course("S001", "C101")
+    
+    assert msg == "Course enrollment successful"
+    courses = service.get_all_courses()
+    assert courses["C101"].seats_available == 29
+
+def test_tc04_enroll_full_course(setup_files):
+    """TC04: Enroll in a full course (seats = 0)[span_11](start_span)[span_11](end_span)"""
+    service, _, _ = setup_files
+    
+    with pytest.raises(CourseFullException) as excinfo:
+        service.enroll_course("S001", "C105")
+    
+    assert str(excinfo.value) == "Enrollment failed: No seats available"
+
+def test_tc05_course_not_found(setup_files):
+    """TC05: Course not found (e.g., C999)[span_12](start_span)[span_12](end_span)"""
+    service, _, _ = setup_files
+    
+    with pytest.raises(CourseNotFoundException) as excinfo:
+        service.enroll_course("S001", "C999")
+        
+    assert str(excinfo.value) == "Error: Course not found"
+
+def test_tc06_student_not_found(setup_files):
+    """TC06: Student not found[span_13](start_span)[span_13](end_span)"""
+    service, _, _ = setup_files
+    
+    with pytest.raises(StudentNotFoundException) as excinfo:
+        service.enroll_course("S999", "C101")
+        
+    assert str(excinfo.value) == "Error: Student not found"
+
+def test_tc07_drop_course(setup_files):
+    """TC07: Drop a registered course[span_14](start_span)[span_14](end_span)"""
+    service, _, _ = setup_files
+    
+    # S002 is already enrolled in C101, C101 has 30 seats initially
+    msg = service.drop_course("S002", "C101")
+    
+    assert msg == "Course dropped successfully"
+    courses = service.get_all_courses()
+    assert courses["C101"].seats_available == 31  # seat count increased
+
+def test_tc08_course_file_missing(tmp_path):
+    """TC08: Course data file missing[span_15](start_span)[span_15](end_span)"""
+    bad_course_path = tmp_path / "missing_courses.csv"
+    good_student_path = tmp_path / "students.csv"
+    good_student_path.write_text("student_id,name,email,enrolled_courses\n")
+    
+    service = RegistrationService(str(bad_course_path), str(good_student_path))
+    
+    with pytest.raises(FileDataNotFoundException) as excinfo:
+        service.get_all_courses()
+        
+    assert str(excinfo.value) == "Error: Course data file not found"
