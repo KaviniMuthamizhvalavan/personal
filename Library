@@ -1,0 +1,332 @@
+datastore = {
+    "members": {},
+    "books": {},
+    "borrows": {}
+}
+class Person:
+    def __init__(self, person_id: str, name: str, age: int):
+        self.id = person_id
+        self.name = name
+        self.age = age
+from models.person import Person
+
+class Member(Person):
+    def __init__(self, member_id: str, name: str, age: int, membership_type: str):
+        super().__init__(member_id, name, age)
+        self.membership_type = membership_type
+class Book:
+    def __init__(self, book_id: str, title: str, author: str, genre: str, is_available: bool = True):
+        self.id = book_id
+        self.title = title
+        self.author = author
+        self.genre = genre
+        self.is_available = is_available
+from datetime import date
+from typing import Optional
+
+class BorrowRecord:
+    def __init__(self, borrow_id: str, member_id: str, book_id: str, borrow_date: date, return_date: Optional[date] = None):
+        self.id = borrow_id
+        self.member_id = member_id
+        self.book_id = book_id
+        self.borrow_date = borrow_date
+        self.return_date = return_date
+from models.book import Book
+
+def validate_membership_type(membership_type: str) -> bool:
+    valid_types = {"regular", "premium", "student"}
+    return membership_type.lower() in valid_types
+
+def is_book_available(book: Book) -> bool:
+    return book is not None and book.is_available
+from models.member import Member
+from utils.validator import validate_membership_type
+
+class MemberService:
+    def __init__(self, datastore: dict):
+        self.datastore = datastore
+
+    def add_member(self, member_id: str, name: str, age: int, membership_type: str) -> Member:
+        if not validate_membership_type(membership_type):
+            raise ValueError("Invalid membership type")
+        if member_id in self.datastore["members"]:
+            raise ValueError("Member ID already exists")
+        member = Member(member_id, name, age, membership_type)
+        self.datastore["members"][member_id] = member
+        return member
+
+    def get_member(self, member_id: str) -> Member:
+        return self.datastore["members"].get(member_id)
+
+    def update_membership(self, member_id: str, new_membership_type: str) -> Member:
+        if not validate_membership_type(new_membership_type):
+            raise ValueError("Invalid membership type")
+        member = self.get_member(member_id)
+        if not member:
+            raise KeyError("Member not found")
+        member.membership_type = new_membership_type
+        return member
+
+    def delete_member(self, member_id: str) -> bool:
+        if member_id in self.datastore["members"]:
+            del self.datastore["members"][member_id]
+            return True
+        return False
+from models.book import Book
+
+class BookService:
+    def __init__(self, datastore: dict):
+        self.datastore = datastore
+
+    def add_book(self, book_id: str, title: str, author: str, genre: str, is_available: bool = True) -> Book:
+        if book_id in self.datastore["books"]:
+            raise ValueError("Book ID already exists")
+        book = Book(book_id, title, author, genre, is_available)
+        self.datastore["books"][book_id] = book
+        return book
+
+    def get_book(self, book_id: str) -> Book:
+        return self.datastore["books"].get(book_id)
+
+    def update_availability(self, book_id: str, is_available: bool) -> Book:
+        book = self.get_book(book_id)
+        if not book:
+            raise KeyError("Book not found")
+        book.is_available = is_available
+        return book
+
+    def delete_book(self, book_id: str) -> bool:
+        if book_id in self.datastore["books"]:
+            del self.datastore["books"][book_id]
+            return True
+        return False
+from datetime import date
+from models.borrow_record import BorrowRecord
+from utils.validator import is_book_available
+
+class BorrowService:
+    def __init__(self, datastore: dict, book_service, member_service):
+        self.datastore = datastore
+        self.book_service = book_service
+        self.member_service = member_service
+
+    def borrow_book(self, borrow_id: str, member_id: str, book_id: str, borrow_date: date) -> BorrowRecord:
+        member = self.member_service.get_member(member_id)
+        if not member:
+            raise KeyError("Member not found")
+        book = self.book_service.get_book(book_id)
+        if not is_book_available(book):
+            raise ValueError("Book is not available")
+        if borrow_id in self.datastore["borrows"]:
+            raise ValueError("Borrow ID already exists")
+
+        record = BorrowRecord(borrow_id, member_id, book_id, borrow_date)
+        self.datastore["borrows"][borrow_id] = record
+        self.book_service.update_availability(book_id, False)
+        return record
+
+    def return_book(self, borrow_id: str, return_date: date) -> BorrowRecord:
+        record = self.datastore["borrows"].get(borrow_id)
+        if not record:
+            raise KeyError("Borrow record not found")
+        if record.return_date is not None:
+            raise ValueError("Book already returned")
+
+        record.return_date = return_date
+        self.book_service.update_availability(record.book_id, True)
+        return record
+
+    def delete_record(self, borrow_id: str) -> bool:
+        if borrow_id in self.datastore["borrows"]:
+            del self.datastore["borrows"][borrow_id]
+            return True
+        return False
+from data.datastore import datastore
+from services.member_service import MemberService
+from services.book_service import BookService
+from services.borrow_service import BorrowService
+
+class LibrarySystem:
+    def __init__(self):
+        self.datastore = datastore
+        self.member_service = MemberService(self.datastore)
+        self.book_service = BookService(self.datastore)
+        self.borrow_service = BorrowService(self.datastore, self.book_service, self.member_service)
+
+    def add_member(self, member_id: str, name: str, age: int, membership_type: str):
+        return self.member_service.add_member(member_id, name, age, membership_type)
+
+    def get_member(self, member_id: str):
+        return self.member_service.get_member(member_id)
+
+    def update_membership(self, member_id: str, new_membership_type: str):
+        return self.member_service.update_membership(member_id, new_membership_type)
+
+    def delete_member(self, member_id: str):
+        return self.member_service.delete_member(member_id)
+
+    def add_book(self, book_id: str, title: str, author: str, genre: str, is_available: bool = True):
+        return self.book_service.add_book(book_id, title, author, genre, is_available)
+
+    def get_book(self, book_id: str):
+        return self.book_service.get_book(book_id)
+
+    def update_book_availability(self, book_id: str, is_available: bool):
+        return self.book_service.update_availability(book_id, is_available)
+
+    def delete_book(self, book_id: str):
+        return self.book_service.delete_book(book_id)
+
+    def borrow_book(self, borrow_id: str, member_id: str, book_id: str, borrow_date):
+        return self.borrow_service.borrow_book(borrow_id, member_id, book_id, borrow_date)
+
+    def return_book(self, borrow_id: str, return_date):
+        return self.borrow_service.return_book(borrow_id, return_date)
+
+    def delete_borrow_record(self, borrow_id: str):
+        return self.borrow_service.delete_record(borrow_id)
+from datetime import date
+from services.library_system import LibrarySystem
+
+def main():
+    library = LibrarySystem()
+    
+    member = library.add_member("M001", "Alice Smith", 28, "regular")
+    print(f"Added Member: {member.name}, Type: {member.membership_type}")
+
+    book1 = library.add_book("B001", "1984", "George Orwell", "Dystopian")
+    book2 = library.add_book("B002", "To Kill a Mockingbird", "Harper Lee", "Fiction")
+    print(f"Added Book: {book1.title} (Available: {book1.is_available})")
+    print(f"Added Book: {book2.title} (Available: {book2.is_available})")
+
+    borrow_record = library.borrow_book("R001", "M001", "B001", date(2026, 7, 19))
+    print(f"Borrow Record Created: Member {borrow_record.member_id} borrowed Book {borrow_record.book_id}")
+    print(f"Updated Availability for '{book1.title}': {library.get_book('B001').is_available}")
+
+    return_record = library.return_book("R001", date(2026, 7, 26))
+    print(f"Book Returned on: {return_record.return_date}")
+    print(f"Updated Availability for '{book1.title}': {library.get_book('B001').is_available}")
+
+if __name__ == "__main__":
+    main()
+import pytest
+from services.member_service import MemberService
+
+@pytest.fixture
+def setup_service():
+    test_datastore = {"members": {}, "books": {}, "borrows": {}}
+    return MemberService(test_datastore), test_datastore
+
+def test_add_member(setup_service):
+    service, datastore = setup_service
+    member = service.add_member("M001", "John Doe", 30, "regular")
+    assert member.id == "M001"
+    assert datastore["members"]["M001"] == member
+    assert len(datastore["members"]) == 1
+
+def test_get_member(setup_service):
+    service, _ = setup_service
+    service.add_member("M001", "John Doe", 30, "regular")
+    member = service.get_member("M001")
+    assert member is not None
+    assert member.name == "John Doe"
+
+def test_update_membership(setup_service):
+    service, datastore = setup_service
+    service.add_member("M001", "John Doe", 30, "regular")
+    updated = service.update_membership("M001", "premium")
+    assert updated.membership_type == "premium"
+    assert datastore["members"]["M001"].membership_type == "premium"
+
+def test_delete_member(setup_service):
+    service, datastore = setup_service
+    service.add_member("M001", "John Doe", 30, "regular")
+    result = service.delete_member("M001")
+    assert result is True
+    assert "M001" not in datastore["members"]
+import pytest
+from services.book_service import BookService
+
+@pytest.fixture
+def setup_service():
+    test_datastore = {"members": {}, "books": {}, "borrows": {}}
+    return BookService(test_datastore), test_datastore
+
+def test_add_book(setup_service):
+    service, datastore = setup_service
+    book = service.add_book("B001", "1984", "George Orwell", "Dystopian")
+    assert book.id == "B001"
+    assert book.is_available is True
+    assert datastore["books"]["B001"] == book
+
+def test_get_book(setup_service):
+    service, _ = setup_service
+    service.add_book("B001", "1984", "George Orwell", "Dystopian")
+    book = service.get_book("B001")
+    assert book is not None
+    assert book.title == "1984"
+
+def test_update_availability(setup_service):
+    service, datastore = setup_service
+    service.add_book("B001", "1984", "George Orwell", "Dystopian")
+    updated = service.update_availability("B001", False)
+    assert updated.is_available is False
+    assert datastore["books"]["B001"].is_available is False
+
+def test_delete_book(setup_service):
+    service, datastore = setup_service
+    service.add_book("B001", "1984", "George Orwell", "Dystopian")
+    result = service.delete_book("B001")
+    assert result is True
+    assert "B001" not in datastore["books"]
+from datetime import date
+import pytest
+from services.borrow_service import BorrowService
+from services.book_service import BookService
+from services.member_service import MemberService
+
+@pytest.fixture
+def setup_services():
+    test_datastore = {"members": {}, "books": {}, "borrows": {}}
+    book_service = BookService(test_datastore)
+    member_service = MemberService(test_datastore)
+    borrow_service = BorrowService(test_datastore, book_service, member_service)
+    return borrow_service, book_service, member_service, test_datastore
+
+def test_borrow_book(setup_services):
+    borrow_service, book_service, member_service, datastore = setup_services
+    member_service.add_member("M001", "Alice", 25, "regular")
+    book_service.add_book("B001", "Dune", "Frank Herbert", "Sci-Fi")
+    
+    record = borrow_service.borrow_book("R001", "M001", "B001", date(2026, 7, 19))
+    assert record.id == "R001"
+    assert datastore["borrows"]["R001"] == record
+    assert datastore["books"]["B001"].is_available is False
+
+def test_borrow_unavailable_book_raises_error(setup_services):
+    borrow_service, book_service, member_service, _ = setup_services
+    member_service.add_member("M001", "Alice", 25, "regular")
+    book_service.add_book("B001", "Dune", "Frank Herbert", "Sci-Fi", is_available=False)
+    
+    with pytest.raises(ValueError):
+        borrow_service.borrow_book("R001", "M001", "B001", date(2026, 7, 19))
+
+def test_return_book(setup_services):
+    borrow_service, book_service, member_service, datastore = setup_services
+    member_service.add_member("M001", "Alice", 25, "regular")
+    book_service.add_book("B001", "Dune", "Frank Herbert", "Sci-Fi")
+    borrow_service.borrow_book("R001", "M001", "B001", date(2026, 7, 19))
+    
+    record = borrow_service.return_book("R001", date(2026, 7, 26))
+    assert record.return_date == date(2026, 7, 26)
+    assert datastore["books"]["B001"].is_available is True
+
+def test_delete_record(setup_services):
+    borrow_service, book_service, member_service, datastore = setup_services
+    member_service.add_member("M001", "Alice", 25, "regular")
+    book_service.add_book("B001", "Dune", "Frank Herbert", "Sci-Fi")
+    borrow_service.borrow_book("R001", "M001", "B001", date(2026, 7, 19))
+    
+    result = borrow_service.delete_record("R001")
+    assert result is True
+    assert "R001" not in datastore["borrows"]
