@@ -1,0 +1,319 @@
+# models/person.py
+
+class Person:
+    def __init__(self, id, name, age):
+        self.id = id
+        self.name = name
+        self.age = age
+# models/customer.py
+
+from models.person import Person
+
+class Customer(Person):
+    def __init__(self, id, name, age, prescription=None):
+        super().__init__(id, name, age)
+        self.prescription = prescription
+# models/medicine.py
+
+class Medicine:
+    def __init__(self, id, name, type, price, quantity):
+        self.id = id
+        self.name = name
+        self.type = type
+        self.price = price
+        self.quantity = quantity
+# models/sale.py
+
+import datetime
+
+class Sale:
+    def __init__(self, id, customer_id, medicine_id, quantity, total_amount, date=None):
+        self.id = id
+        self.customer_id = customer_id
+        self.medicine_id = medicine_id
+        self.quantity = quantity
+        self.total_amount = total_amount
+        self.date = date if date else datetime.datetime.now().isoformat()
+# data/datastore.py
+
+datastore = {
+    "customers": {},
+    "medicines": {},
+    "sales": {}
+}
+# utils/validator.py
+
+def check_stock(medicine, requested_quantity):
+    return medicine.quantity >= requested_quantity
+
+def validate_age_for_prescription(customer):
+    return customer.age >= 18
+# services/customer_service.py
+
+from data.datastore import datastore
+
+class CustomerService:
+    def add_customer(self, customer):
+        datastore["customers"][customer.id] = customer
+        return customer
+
+    def get_customer(self, customer_id):
+        return datastore["customers"].get(customer_id)
+
+    def update_prescription(self, customer_id, prescription):
+        customer = self.get_customer(customer_id)
+        if customer:
+            customer.prescription = prescription
+            return customer
+        return None
+
+    def delete_customer(self, customer_id):
+        if customer_id in datastore["customers"]:
+            del datastore["customers"][customer_id]
+            return True
+        return False
+# services/medicine_service.py
+
+from data.datastore import datastore
+
+class MedicineService:
+    def add_medicine(self, medicine):
+        datastore["medicines"][medicine.id] = medicine
+        return medicine
+
+    def get_medicine(self, medicine_id):
+        return datastore["medicines"].get(medicine_id)
+
+    def update_stock(self, medicine_id, quantity):
+        medicine = self.get_medicine(medicine_id)
+        if medicine:
+            medicine.quantity = quantity
+            return medicine
+        return None
+
+    def update_price(self, medicine_id, price):
+        medicine = self.get_medicine(medicine_id)
+        if medicine:
+            medicine.price = price
+            return medicine
+        return None
+
+    def delete_medicine(self, medicine_id):
+        if medicine_id in datastore["medicines"]:
+            del datastore["medicines"][medicine_id]
+            return True
+        return False
+# services/sale_service.py
+
+import uuid
+from data.datastore import datastore
+from models.sale import Sale
+from utils.validator import check_stock
+
+class SaleService:
+    def create_sale(self, customer_id, medicine_id, quantity):
+        customer = datastore["customers"].get(customer_id)
+        medicine = datastore["medicines"].get(medicine_id)
+        
+        if not customer or not medicine:
+            raise ValueError("Customer or Medicine not found")
+        
+        if not check_stock(medicine, quantity):
+            raise ValueError("Insufficient stock")
+
+        medicine.quantity -= quantity
+        total_amount = medicine.price * quantity
+        sale_id = str(uuid.uuid4())
+        sale = Sale(sale_id, customer_id, medicine_id, quantity, total_amount)
+        datastore["sales"][sale_id] = sale
+        return sale
+
+    def get_sale(self, sale_id):
+        return datastore["sales"].get(sale_id)
+
+    def delete_sale(self, sale_id):
+        if sale_id in datastore["sales"]:
+            del datastore["sales"][sale_id]
+            return True
+        return False
+# services/pharmacy_system.py
+
+from services.customer_service import CustomerService
+from services.medicine_service import MedicineService
+from services.sale_service import SaleService
+
+class PharmacySystem:
+    def __init__(self):
+        self.customer_service = CustomerService()
+        self.medicine_service = MedicineService()
+        self.sale_service = SaleService()
+# main.py
+
+from models.customer import Customer
+from models.medicine import Medicine
+from services.pharmacy_system import PharmacySystem
+
+def main():
+    system = PharmacySystem()
+
+    customer = Customer(id=1, name="Alice", age=30, prescription="Ibuprofen 400mg")
+    system.customer_service.add_customer(customer)
+
+    medicine = Medicine(id=101, name="Ibuprofen", type="Painkiller", price=5.50, quantity=100)
+    system.medicine_service.add_medicine(medicine)
+
+    try:
+        sale = system.sale_service.create_sale(customer_id=1, medicine_id=101, quantity=2)
+        print(f"Sale created! Sale ID: {sale.id}, Total: ${sale.total_amount}")
+        print(f"Remaining stock for {medicine.name}: {medicine.quantity}")
+    except Exception as e:
+        print(f"Error: {e}")
+
+if __name__ == "__main__":
+    main()
+# tests/test_customer.py
+
+import pytest
+from models.customer import Customer
+from services.customer_service import CustomerService
+from data.datastore import datastore
+
+@pytest.fixture(autouse=True)
+def reset_datastore():
+    datastore["customers"].clear()
+    datastore["medicines"].clear()
+    datastore["sales"].clear()
+
+def test_add_customer():
+    service = CustomerService()
+    customer = Customer(1, "Bob", 25, "Med A")
+    service.add_customer(customer)
+    assert datastore["customers"][1].name == "Bob"
+
+def test_get_customer():
+    service = CustomerService()
+    customer = Customer(2, "Charlie", 40)
+    service.add_customer(customer)
+    fetched = service.get_customer(2)
+    assert fetched.age == 40
+
+def test_update_prescription():
+    service = CustomerService()
+    customer = Customer(3, "Dave", 50, "Med B")
+    service.add_customer(customer)
+    service.update_prescription(3, "Med C")
+    assert datastore["customers"][3].prescription == "Med C"
+
+def test_delete_customer():
+    service = CustomerService()
+    customer = Customer(4, "Eve", 22)
+    service.add_customer(customer)
+    assert service.delete_customer(4) is True
+    assert service.get_customer(4) is None
+# tests/test_medicine.py
+
+import pytest
+from models.medicine import Medicine
+from services.medicine_service import MedicineService
+from data.datastore import datastore
+
+@pytest.fixture(autouse=True)
+def reset_datastore():
+    datastore["customers"].clear()
+    datastore["medicines"].clear()
+    datastore["sales"].clear()
+
+def test_add_medicine():
+    service = MedicineService()
+    medicine = Medicine(1, "Paracetamol", "Fever", 2.0, 50)
+    service.add_medicine(medicine)
+    assert datastore["medicines"][1].name == "Paracetamol"
+
+def test_get_medicine():
+    service = MedicineService()
+    medicine = Medicine(2, "Amoxicillin", "Antibiotic", 15.0, 20)
+    service.add_medicine(medicine)
+    fetched = service.get_medicine(2)
+    assert fetched.type == "Antibiotic"
+
+def test_update_stock():
+    service = MedicineService()
+    medicine = Medicine(3, "Aspirin", "Pain", 1.5, 100)
+    service.add_medicine(medicine)
+    service.update_stock(3, 80)
+    assert datastore["medicines"][3].quantity == 80
+
+def test_update_price():
+    service = MedicineService()
+    medicine = Medicine(4, "Vitamin C", "Supplement", 5.0, 200)
+    service.add_medicine(medicine)
+    service.update_price(4, 6.0)
+    assert datastore["medicines"][4].price == 6.0
+
+def test_delete_medicine():
+    service = MedicineService()
+    medicine = Medicine(5, "Zinc", "Supplement", 3.0, 30)
+    service.add_medicine(medicine)
+    assert service.delete_medicine(5) is True
+    assert service.get_medicine(5) is None
+# tests/test_sale.py
+
+import pytest
+from models.customer import Customer
+from models.medicine import Medicine
+from services.customer_service import CustomerService
+from services.medicine_service import MedicineService
+from services.sale_service import SaleService
+from data.datastore import datastore
+
+@pytest.fixture(autouse=True)
+def reset_datastore():
+    datastore["customers"].clear()
+    datastore["medicines"].clear()
+    datastore["sales"].clear()
+
+def test_create_sale():
+    cust_service = CustomerService()
+    med_service = MedicineService()
+    sale_service = SaleService()
+    
+    customer = Customer(1, "John", 30)
+    medicine = Medicine(10, "Cough Syrup", "Liquid", 10.0, 5)
+    cust_service.add_customer(customer)
+    med_service.add_medicine(medicine)
+    
+    sale = sale_service.create_sale(1, 10, 2)
+    
+    assert sale.total_amount == 20.0
+    assert datastore["medicines"][10].quantity == 3
+    assert sale.id in datastore["sales"]
+
+def test_create_sale_insufficient_stock():
+    cust_service = CustomerService()
+    med_service = MedicineService()
+    sale_service = SaleService()
+    
+    customer = Customer(2, "Jane", 28)
+    medicine = Medicine(11, "Drops", "Liquid", 5.0, 1)
+    cust_service.add_customer(customer)
+    med_service.add_medicine(medicine)
+    
+    with pytest.raises(ValueError, match="Insufficient stock"):
+        sale_service.create_sale(2, 11, 2)
+
+def test_get_and_delete_sale():
+    cust_service = CustomerService()
+    med_service = MedicineService()
+    sale_service = SaleService()
+    
+    customer = Customer(3, "Doe", 40)
+    medicine = Medicine(12, "Pills", "Tablet", 2.0, 10)
+    cust_service.add_customer(customer)
+    med_service.add_medicine(medicine)
+    
+    sale = sale_service.create_sale(3, 12, 1)
+    fetched = sale_service.get_sale(sale.id)
+    assert fetched.id == sale.id
+    
+    assert sale_service.delete_sale(sale.id) is True
+    assert sale_service.get_sale(sale.id) is None
