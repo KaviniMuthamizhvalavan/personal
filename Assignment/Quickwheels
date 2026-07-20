@@ -1,0 +1,450 @@
+# models/person.py
+class Person:
+    def __init__(self, person_id, name, age, phone):
+        self.person_id = person_id
+        self.name = name
+        self.age = age
+        self.phone = phone
+# models/customer.py
+from models.person import Person
+
+class Customer(Person):
+    def __init__(self, person_id, name, age, phone, license_no, private_wallet=0.0):
+        super().__init__(person_id, name, age, phone)
+        self.license_no = license_no
+        self.__wallet = private_wallet
+
+    def add_money(self, amount):
+        if amount > 0:
+            self.__wallet += amount
+
+    def pay(self, amount):
+        if amount > 0 and self.__wallet >= amount:
+            self.__wallet -= amount
+            return True
+        return False
+
+    @property
+    def balance(self):
+        return self.__wallet
+# models/vehicle.py
+class Vehicle:
+    company = "QuickWheels"
+    id_prefix = ""
+    deposit_days = 0
+    auto_id_counter = 101
+
+    def __init__(self, name, daily_rate, vehicle_id=None):
+        if vehicle_id:
+            self.vehicle_id = vehicle_id
+        else:
+            self.vehicle_id = f"{self.id_prefix}{self.__class__.auto_id_counter}"
+            self.__class__.auto_id_counter += 1
+        self.name = name
+        self.available = True
+        self.daily_rate = daily_rate
+
+    @property
+    def daily_rate(self):
+        return self._daily_rate
+
+    @daily_rate.setter
+    def daily_rate(self, value):
+        if value <= 0:
+            raise ValueError()
+        self._daily_rate = value
+
+    def rental_cost(self, days):
+        pass
+
+    def __eq__(self, other):
+        if isinstance(other, Vehicle):
+            return self.daily_rate == other.daily_rate
+        return False
+
+    def __lt__(self, other):
+        if isinstance(other, Vehicle):
+            return self.daily_rate < other.daily_rate
+        return NotImplemented
+
+    def __str__(self):
+        return f"{self.vehicle_id} - {self.name}"
+
+class Bike(Vehicle):
+    id_prefix = "B-"
+    deposit_days = 1
+
+    def rental_cost(self, days):
+        return self.daily_rate * days
+
+class Car(Vehicle):
+    id_prefix = "C-"
+    deposit_days = 2
+
+    def rental_cost(self, days):
+        return self.daily_rate * days * 1.05
+
+class SUV(Vehicle):
+    id_prefix = "S-"
+    deposit_days = 3
+
+    def rental_cost(self, days):
+        return (self.daily_rate * days) + 500
+# models/rental.py
+class Rental:
+    auto_id_counter = 5001
+
+    def __init__(self, customer, vehicle, planned_days, amount_paid, deposit):
+        self.rental_id = self.__class__.auto_id_counter
+        self.__class__.auto_id_counter += 1
+        self.customer = customer
+        self.vehicle = vehicle
+        self.planned_days = planned_days
+        self.amount_paid = amount_paid
+        self.deposit = deposit
+        self.status = "ACTIVE"
+
+    def __del__(self):
+        damage_note = getattr(self, "damage_note", "")
+        print(f"[ARCHIVE] Rental Invoice {self.rental_id} closed {damage_note}".strip())
+
+    def __str__(self):
+        return f"Rental {self.rental_id}: {self.customer.name} rented {self.vehicle.vehicle_id}"
+# data/datastore.py
+DATASTORE = {
+    "customers": {},
+    "vehicles": {},
+    "rentals": {}
+}
+# data/seed_data.py
+from models.customer import Customer
+from models.vehicle import Bike, Car, SUV
+from services.rental_system import RentalSystem
+
+def load_seed_data(system: RentalSystem):
+    v1 = Bike("Honda Activa", 400, "B-101")
+    v2 = Car("Maruti Swift", 1800, "C-201")
+    v3 = SUV("Toyota Innova", 3500, "S-301")
+    system.vehicle_service.add(v1)
+    system.vehicle_service.add(v2)
+    system.vehicle_service.add(v3)
+
+    c1 = Customer("CU01", "Arjun", 24, "1234567890", "TN10-2021-0042", 5000)
+    c2 = Customer("CU02", "Meera", 31, "0987654321", "TN22-2018-0913", 15000)
+    c3 = Customer("CU03", "Rahul", 17, "1112223333", None, 2000)
+    system.customer_service.add(c1)
+    system.customer_service.add(c2)
+    system.customer_service.add(c3)
+# utils/validator.py
+def is_eligible(customer):
+    return customer.age >= 18 and bool(customer.license_no)
+
+def is_available(vehicle):
+    return vehicle.available
+
+def positive_int(value):
+    try:
+        val = int(value)
+        return val > 0
+    except ValueError:
+        return False
+# services/customer_service.py
+from data.datastore import DATASTORE
+
+class CustomerService:
+    def add(self, customer):
+        DATASTORE["customers"][customer.person_id] = customer
+
+    def get(self, customer_id):
+        return DATASTORE["customers"].get(customer_id)
+
+    def list(self):
+        return list(DATASTORE["customers"].values())
+
+    def update_phone(self, customer_id, phone):
+        customer = self.get(customer_id)
+        if customer:
+            customer.phone = phone
+
+    def delete(self, customer_id):
+        if customer_id in DATASTORE["customers"]:
+            del DATASTORE["customers"][customer_id]
+# services/vehicle_service.py
+from data.datastore import DATASTORE
+
+class VehicleService:
+    def add(self, vehicle):
+        DATASTORE["vehicles"][vehicle.vehicle_id] = vehicle
+
+    def get(self, vehicle_id):
+        return DATASTORE["vehicles"].get(vehicle_id)
+
+    def list(self):
+        return list(DATASTORE["vehicles"].values())
+
+    def delete(self, vehicle_id):
+        if vehicle_id in DATASTORE["vehicles"]:
+            del DATASTORE["vehicles"][vehicle_id]
+
+    def apply_festival_offer(self, vehicle_id, pct):
+        vehicle = self.get(vehicle_id)
+        if vehicle:
+            setattr(vehicle, "festival_offer", pct)
+# services/rental_service.py
+from data.datastore import DATASTORE
+from models.rental import Rental
+from utils.validator import is_eligible, is_available
+
+class RentalService:
+    def rent(self, cust_id, veh_id, days):
+        customer = DATASTORE["customers"].get(cust_id)
+        vehicle = DATASTORE["vehicles"].get(veh_id)
+
+        if not customer or not vehicle:
+            return None
+
+        if not is_eligible(customer) or not is_available(vehicle):
+            return None
+
+        cost = vehicle.rental_cost(days)
+        offer = getattr(vehicle, "festival_offer", 0)
+        if offer > 0:
+            cost -= cost * (offer / 100)
+
+        deposit = vehicle.daily_rate * vehicle.deposit_days
+        total = cost + deposit
+
+        if customer.pay(total):
+            vehicle.available = False
+            rental = Rental(customer, vehicle, days, cost, deposit)
+            DATASTORE["rentals"][rental.rental_id] = rental
+            return rental
+        return None
+
+    def return_vehicle(self, rental_id, actual_days, damage_note=None):
+        rental = self.get(rental_id)
+        if not rental or rental.status == "CLOSED":
+            return False
+
+        extra_days = actual_days - rental.planned_days
+        late_fee = 0
+        if extra_days > 0:
+            late_fee = extra_days * rental.vehicle.daily_rate * 1.5
+
+        damage_fine = 1000 if damage_note else 0
+        charges = late_fee + damage_fine
+
+        refund = max(0, rental.deposit - charges)
+        rental.customer.add_money(refund)
+        
+        if damage_note:
+            setattr(rental, "damage_note", damage_note)
+
+        rental.vehicle.available = True
+        rental.status = "CLOSED"
+        return True
+
+    def get(self, rental_id):
+        return DATASTORE["rentals"].get(rental_id)
+
+    def list(self):
+        return list(DATASTORE["rentals"].values())
+
+    def delete(self, rental_id):
+        if rental_id in DATASTORE["rentals"]:
+            del DATASTORE["rentals"][rental_id]
+# services/rental_system.py
+from services.customer_service import CustomerService
+from services.vehicle_service import VehicleService
+from services.rental_service import RentalService
+
+class RentalSystem:
+    def __init__(self):
+        self.customer_service = CustomerService()
+        self.vehicle_service = VehicleService()
+        self.rental_service = RentalService()
+# main.py
+from services.rental_system import RentalSystem
+from models.customer import Customer
+from models.vehicle import Bike, Car, SUV
+from data.seed_data import load_seed_data
+from utils.validator import positive_int
+
+def main():
+    system = RentalSystem()
+    load_seed_data(system)
+
+    while True:
+        print("\n====== QUICKWHEELS VEHICLE RENTAL ======")
+        print("1. Register customer")
+        print("2. Add vehicle")
+        print("3. View vehicles (sorted by rate)")
+        print("4. Rent a vehicle")
+        print("5. Return a vehicle")
+        print("6. View rentals")
+        print("7. Exit")
+        
+        choice = input("Enter choice: ")
+
+        if choice == "1":
+            c_id = input("ID: ")
+            name = input("Name: ")
+            age = int(input("Age: "))
+            phone = input("Phone: ")
+            lic = input("License (or None): ")
+            wallet = float(input("Wallet: "))
+            if lic.lower() == "none":
+                lic = None
+            system.customer_service.add(Customer(c_id, name, age, phone, lic, wallet))
+        elif choice == "2":
+            v_type = input("Type (Bike/Car/SUV): ")
+            name = input("Name: ")
+            rate = float(input("Daily rate: "))
+            if v_type == "Bike":
+                v = Bike(name, rate)
+            elif v_type == "Car":
+                v = Car(name, rate)
+            elif v_type == "SUV":
+                v = SUV(name, rate)
+            else:
+                continue
+            system.vehicle_service.add(v)
+        elif choice == "3":
+            vehicles = system.vehicle_service.list()
+            for v in sorted(vehicles):
+                print(f"{v} - Rate: {v.daily_rate} - Available: {v.available}")
+        elif choice == "4":
+            c_id = input("Customer ID: ")
+            v_id = input("Vehicle ID: ")
+            days = input("Days: ")
+            if positive_int(days):
+                r = system.rental_service.rent(c_id, v_id, int(days))
+                if r:
+                    print(f"Rented successfully! Rental ID: {r.rental_id}")
+                else:
+                    print("Rental failed. Check availability, eligibility, or funds.")
+            else:
+                print("Days must be a positive integer.")
+        elif choice == "5":
+            r_id = input("Rental ID: ")
+            if positive_int(r_id):
+                days = int(input("Actual days: "))
+                note = input("Damage note (leave empty if none): ")
+                if not note:
+                    note = None
+                if system.rental_service.return_vehicle(int(r_id), days, note):
+                    print("Vehicle returned successfully.")
+                else:
+                    print("Return failed.")
+            else:
+                print("Invalid Rental ID.")
+        elif choice == "6":
+            for r in system.rental_service.list():
+                print(f"{r} - Status: {r.status}")
+        elif choice == "7":
+            rentals = system.rental_service.list()
+            for r in rentals:
+                del r
+            break
+        else:
+            print("Invalid choice. Try again.")
+
+if __name__ == "__main__":
+    main()
+# tests/test_customer.py
+import pytest
+from data.datastore import DATASTORE
+from models.customer import Customer
+from services.customer_service import CustomerService
+
+@pytest.fixture(autouse=True)
+def setup_teardown():
+    DATASTORE["customers"].clear()
+    DATASTORE["vehicles"].clear()
+    DATASTORE["rentals"].clear()
+
+def test_add_customer():
+    service = CustomerService()
+    c = Customer("C99", "Test Name", 20, "1234567890", "LIC123", 100)
+    service.add(c)
+    assert "C99" in DATASTORE["customers"]
+    assert DATASTORE["customers"]["C99"].name == "Test Name"
+
+def test_wallet_encapsulation():
+    c = Customer("C99", "Test Name", 20, "1234567890", "LIC123", 100)
+    assert c.pay(150) is False
+    assert c.balance == 100
+    with pytest.raises(AttributeError):
+        _ = c._wallet
+# tests/test_vehicle.py
+import pytest
+from data.datastore import DATASTORE
+from models.vehicle import Bike, Car, SUV
+
+@pytest.fixture(autouse=True)
+def setup_teardown():
+    DATASTORE["customers"].clear()
+    DATASTORE["vehicles"].clear()
+    DATASTORE["rentals"].clear()
+
+def test_rental_cost_overriding():
+    b = Bike("Bike1", 400)
+    c = Car("Car1", 1800)
+    s = SUV("SUV1", 3500)
+    assert b.rental_cost(2) == 800
+    assert c.rental_cost(2) == 3780
+    assert s.rental_cost(2) == 7500
+
+def test_rate_validation():
+    with pytest.raises(ValueError):
+        Bike("Bike2", 0)
+    with pytest.raises(ValueError):
+        Car("Car2", -50)
+# tests/test_rental.py
+import pytest
+from data.datastore import DATASTORE
+from models.customer import Customer
+from models.vehicle import Bike
+from services.rental_service import RentalService
+from services.customer_service import CustomerService
+from services.vehicle_service import VehicleService
+
+@pytest.fixture(autouse=True)
+def setup_teardown():
+    DATASTORE["customers"].clear()
+    DATASTORE["vehicles"].clear()
+    DATASTORE["rentals"].clear()
+
+def test_rent_success():
+    cs = CustomerService()
+    vs = VehicleService()
+    rs = RentalService()
+    
+    c = Customer("C1", "Test Cust", 25, "123", "LIC1", 1500)
+    v = Bike("Honda", 400, "B-101")
+    cs.add(c)
+    vs.add(v)
+    
+    rental = rs.rent("C1", "B-101", 2)
+    
+    assert rental is not None
+    assert rental.rental_id in DATASTORE["rentals"]
+    assert v.available is False
+    assert c.balance == 300
+
+def test_ineligible_blocked():
+    cs = CustomerService()
+    vs = VehicleService()
+    rs = RentalService()
+    
+    c = Customer("CU03", "Rahul", 17, "111", None, 2000)
+    v = Bike("Honda", 400, "B-101")
+    cs.add(c)
+    vs.add(v)
+    
+    rental = rs.rent("CU03", "B-101", 2)
+    
+    assert rental is None
+    assert len(DATASTORE["rentals"]) == 0
+    assert v.available is True
+    assert c.balance == 2000
