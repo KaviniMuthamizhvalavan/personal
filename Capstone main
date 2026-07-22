@@ -1,0 +1,35 @@
+import argparse
+import logging
+import sys
+import datetime
+from io_utils import load_subscribers, load_cdrs, write_report
+
+def main():
+    # Q3.4: Configure logging
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+    
+    print(f"=== Telecom CDR & Billing Insights CLI | {datetime.datetime.now().strftime('%Y-%m-%d')} ===")
+    
+    # Q3.4: Wire everything together using argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--subscribers", required=True)
+    parser.add_argument("--cdrs", required=True)
+    parser.add_argument("--output", required=True)
+    parser.add_argument("--fraud-threshold-sec", type=int, default=3600)
+    args = parser.parse_args()
+
+    subscribers = load_subscribers(args.subscribers)
+    valid_cdrs, total_rows, malformed_rows = load_cdrs(args.cdrs)
+
+    # Q3.5: Implement NFR2 (Fail batch if >10% rows are bad)
+    if total_rows > 0 and (malformed_rows / total_rows) > 0.10:
+        logging.critical("More than 10% of CDR rows are malformed. Aborting batch.")
+        sys.exit(1)
+
+    # Note: Business logic execution (rating, fraud checking) 
+    # would occur here before building and writing the report.
+    report_data = {"status": "success", "processed": len(valid_cdrs)}
+    write_report(report_data, args.output)
+
+if __name__ == "__main__":
+    main()
