@@ -1,0 +1,35 @@
+def write_report(report: dict, output_path: str) -> None:
+    """Writes the final report as indented JSON."""
+    try:
+        with open(output_path, 'w', encoding='utf-8') as f:
+            json.dump(report, f, indent=4)
+        logger.info(f"Report written successfully to {output_path}")
+    except Exception as e:
+        logger.error(f"Failed to write report to {output_path}: {e}")
+        raise
+
+"""Builds final data structures for the output report."""
+from typing import Dict, List, Set
+from models import Subscriber
+
+def build_report(
+    subscribers: Dict[str, Subscriber], 
+    unknown_msisdns: Set[str], 
+    fraud_suspects: List[Dict]
+) -> dict:
+    """Aggregates all insights into a standard JSON report format."""
+    
+    subscriber_reports = []
+    for msisdn, sub in subscribers.items():
+        subscriber_reports.append({
+            "msisdn": msisdn,
+            "plan_type": sub.plan_type,
+            "call_count": len(sub.calls),
+            "total_cost": sub.total_cost()
+        })
+        
+    return {
+        "subscribers": subscriber_reports,
+        "unknown_subscribers": list(unknown_msisdns),
+        "fraud_suspects": fraud_suspects
+    }
