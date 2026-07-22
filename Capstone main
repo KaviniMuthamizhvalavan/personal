@@ -1,35 +1,106 @@
+"""CLI entry point for Telecom CDR & Billing Insights tool."""
 import argparse
 import logging
 import sys
-import datetime
+from datetime import datetime
+
+# Importing from our local modules as defined in the Architecture
+from config import DEFAULT_FRAUD_THRESHOLD_SEC
 from io_utils import load_subscribers, load_cdrs, write_report
+from rating import compute_cost
+from fraud import is_suspicious
+from reporting import build_report
+
+def setup_logging():
+    """Configures centralized logging for status and errors (NFR1)."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
 
 def main():
-    # Q3.4: Configure logging
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-    
-    print(f"=== Telecom CDR & Billing Insights CLI | {datetime.datetime.now().strftime('%Y-%m-%d')} ===")
-    
+    # Configure logging once at the start (Q3.4)
+    setup_logging()
+    logger = logging.getLogger(__name__)
+
+    # Q1.1: Startup banner, guarded to run only when executed directly
+    print(f"=== Telecom CDR & Billing Insights CLI | {datetime.now().strftime('%Y-%m-%d')} ===")
+
     # Q3.4: Wire everything together using argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--subscribers", required=True)
-    parser.add_argument("--cdrs", required=True)
-    parser.add_argument("--output", required=True)
-    parser.add_argument("--fraud-threshold-sec", type=int, default=3600)
+    parser = argparse.ArgumentParser(description="Process daily telecom CDRs.")
+    parser.add_argument("--subscribers", required=True, help="Path to master subscribers JSON")
+    parser.add_argument("--cdrs", required=True, help="Path to raw CDRs CSV")
+    parser.add_argument("--output", required=True, help="Path to write the report JSON")
+    parser.add_argument("--fraud-threshold-sec", type=int, default=DEFAULT_FRAUD_THRESHOLD_SEC, 
+                        help="Threshold for international calls in seconds (default: 3600)")
+
     args = parser.parse_args()
 
-    subscribers = load_subscribers(args.subscribers)
-    valid_cdrs, total_rows, malformed_rows = load_cdrs(args.cdrs)
-
-    # Q3.5: Implement NFR2 (Fail batch if >10% rows are bad)
-    if total_rows > 0 and (malformed_rows / total_rows) > 0.10:
-        logging.critical("More than 10% of CDR rows are malformed. Aborting batch.")
+    # --- 1. Data Access Layer ---
+    logger.info("Loading subscriber master list...")
+    try:
+        subscribers = load_subscribers(args.subscribers)
+    except Exception:
         sys.exit(1)
 
-    # Note: Business logic execution (rating, fraud checking) 
-    # would occur here before building and writing the report.
-    report_data = {"status": "success", "processed": len(valid_cdrs)}
-    write_report(report_data, args.output)
+    logger.info("Loading CDR batch...")
+    try:
+        valid_cdrs, total_rows, malformed_rows = load_cdrs(args.cdrs)
+    except Exception:
+        sys.exit(1)
 
+    if total_rows == 0:
+        logger.error("No data found in CDR file.")
+        sys.exit(1)
+
+    # --- 2. Batch Validation (NFR2 & Q3.5) ---
+    # If >10% of CDR rows are malformed, log CRITICAL and exit
+    malformed_pct = (malformed_rows / total_rows) * 100
+    if malformed_pct > 10.0:
+        logger.critical(f"Batch rejected: {malformed_pct:.1f}% malformed rows exceeds 10% limit.")
+        sys.exit(1)
+
+    # --- 3. Business Logic Layer ---
+    logger.info("Processing CDR rating and anomaly detection...")
+    unknown_msisdns = set() # Q2.4: Using a set for unknown subscribers
+    fraud_suspects = []
+
+    for cdr in valid_cdrs:
+        msisdn = cdr["msisdn"]
+        call_type = cdr["call_type"]
+        duration = cdr["duration_sec"]
+
+        # Rating (FR4): Compute cost using rating.py
+        cost = compute_cost(call_type, duration)
+        cdr["cost"] = cost
+
+        # Fraud Checking (FR5): Check anomalies using fraud.py
+        if is_suspicious(call_type, duration, cost, args.fraud_threshold_sec):
+            fraud_suspects.append(cdr)
+
+        # Aggregation (FR6 & FR7)
+        if msisdn not in subscribers:
+            unknown_msisdns.add(msisdn)
+        else:
+            # Add the processed CDR to the subscriber's call list
+            subscribers[msisdn].calls.append(cdr)
+
+    # --- 4. Reporting Layer ---
+    logger.info("Building and writing final report...")
+    report = build_report(subscribers, unknown_msisdns, fraud_suspects)
+    
+    # Write the indented JSON (FR8)
+    write_report(report, args.output)
+
+    # Final Human Readable Console Summary (FR8)
+    print("\n--- Daily Batch Summary ---")
+    print(f"Total CDRs Processed: {total_rows}")
+    print(f"Malformed Rows Skipped: {malformed_rows} ({malformed_pct:.2f}%)")
+    print(f"Unknown Subscribers Found: {len(unknown_msisdns)}")
+    print(f"Fraud Suspects Flagged: {len(fraud_suspects)}")
+    print(f"Report successfully saved to: {args.output}")
+
+# Guard entry point to prevent top-level side effects (Coding Standard #5)
 if __name__ == "__main__":
     main()
