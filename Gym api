@@ -1,0 +1,197 @@
+const express = require('express');
+const fs = require('fs').promises;
+const crypto = require('crypto');
+const path = require('path');
+
+const app = express();
+const PORT = 3000;
+
+// Database file paths
+const SCHEDULE_FILE = path.join(__dirname, 'class-schedule.json');
+const LOG_FILE = path.join(__dirname, 'enrollment-log.json');
+
+// Middleware: Parse JSON and catch malformed JSON errors
+app.use(express.json());
+app.use((err, req, res, next) => {
+    if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+        return res.status(400).json({ error: 'Malformed JSON payload.' });
+    }
+    next();
+});
+
+// Helper: Read Database
+async function readDB(filePath) {
+    const data = await fs.readFile(filePath, 'utf-8');
+    return JSON.parse(data);
+}
+
+// Helper: Write Database
+async function writeDB(filePath, data) {
+    await fs.writeFile(filePath, JSON.stringify(data, null, 2), 'utf-8');
+}
+
+// ==========================================
+// ROUTES
+// ==========================================
+
+// GET /enrollments - List all enrollments
+app.get('/enrollments', async (req, res) => {
+    try {
+        const enrollments = await readDB(LOG_FILE);
+        res.status(200).json(enrollments);
+    } catch (error) {
+        res.status(500).json({ error: 'Failed to retrieve enrollments.' });
+    }
+});
+
+// POST /enrollments - Enroll a member
+app.post('/enrollments', async (req, res) => {
+    const { memberName, className, classDate } = req.body;
+
+    // 1. Validation: Check required fields
+    if (!memberName || !className || !classDate) {
+        return res.status(400).json({ 
+            error: 'Missing required fields. Please provide memberName, className, and classDate.' 
+        });
+    }
+
+    try {
+        const schedule = await readDB(SCHEDULE_FILE);
+        
+        // 2. Validation: Check if class exists in the schedule
+        const classIndex = schedule.findIndex(
+            (c) => c.className === className && c.classDate === classDate
+        );
+
+        if (classIndex === -1) {
+            return res.status(404).json({ error: 'Class not found in the schedule.' });
+        }
+
+        const gymClass = schedule[classIndex];
+
+        // 3. Business Rule Validation: Check capacity
+        if (gymClass.enrolledCount >= gymClass.capacity) {
+            return res.status(422).json({ error: 'Enrollment rejected. Class is at maximum capacity.' });
+        }
+
+        // 4. Transaction Setup
+        const newEnrollment = {
+            id: crypto.randomUUID(),
+            memberName,
+            className,
+            classDate,
+            classId: gymClass.id,
+            enrolledAt: new Date().toISOString()
+        };
+
+        // Increment count temporarily in memory
+        schedule[classIndex].enrolledCount += 1;
+
+        // 5. Execute simulated transaction with rollback
+        try {
+            // Step A: Save the updated schedule
+            await writeDB(SCHEDULE_FILE, schedule);
+            
+            // Step B: Append to the enrollment log
+            const enrollments = await readDB(LOG_FILE);
+            enrollments.push(newEnrollment);
+            await writeDB(LOG_FILE, enrollments);
+
+            res.status(201).json({
+                message: 'Successfully enrolled!',
+                enrollment: newEnrollment
+            });
+        } catch (transactionError) {
+            // ROLLBACK: If Step B fails, revert the schedule count
+            schedule[classIndex].enrolledCount -= 1;
+            await writeDB(SCHEDULE_FILE, schedule);
+            throw new Error('Transaction failed, state rolled back.');
+        }
+
+    } catch (error) {
+        res.status(500).json({ error: 'Internal server error during enrollment.' });
+    }
+});
+
+// BONUS: DELETE /enrollments/:id - Cancel an enrollment
+app.delete('/enrollments/:id', async (req, res) => {
+    const { id } = req.params;
+
+    try {
+        const enrollments = await readDB(LOG_FILE);
+        const enrollmentIndex = enrollments.findIndex(e => e.id === id);
+
+        if (enrollmentIndex === -1) {
+            return res.status(404).json({ error: 'Enrollment not found.' });
+        }
+
+        const enrollmentToCancel = enrollments[enrollmentIndex];
+
+        // Read schedule to free up the slot
+        const schedule = await readDB(SCHEDULE_FILE);
+        const classIndex = schedule.findIndex(c => c.id === enrollmentToCancel.classId);
+
+        // Remove from log
+        enrollments.splice(enrollmentIndex, 1);
+        await writeDB(LOG_FILE, enrollments);
+
+        // Decrement schedule capacity if the class still exists
+        if (classIndex !== -1) {
+            schedule[classIndex].enrolledCount = Math.max(0, schedule[classIndex].enrolledCount - 1);
+            await writeDB(SCHEDULE_FILE, schedule);
+        }
+
+        res.status(200).json({ message: 'Enrollment successfully cancelled.' });
+    } catch (error) {
+        res.status(500).json({ error: 'Internal server error during cancellation.' });
+    }
+});
+
+// ==========================================
+// INITIALIZATION
+// ==========================================
+
+async function initDB() {
+    // Seed the class schedule if it doesn't exist
+    try {
+        await fs.access(SCHEDULE_FILE);
+    } catch {
+        const initialSchedule = [
+            { id: "c1", className: "HIIT", classDate: "2026-07-25", capacity: 20, enrolledCount: 19 },
+            { id: "c2", className: "Yoga", classDate: "2026-07-26", capacity: 15, enrolledCount: 5 }
+        ];
+        await writeDB(SCHEDULE_FILE, initialSchedule);
+        console.log('Created starter class-schedule.json');
+    }
+
+    // Create an empty enrollment log if it doesn't exist
+    try {
+        await fs.access(LOG_FILE);
+    } catch {
+        await writeDB(LOG_FILE, []);
+        console.log('Created starter enrollment-log.json');
+    }
+}
+
+// Start Server
+initDB().then(() => {
+    app.listen(PORT, () => {
+        console.log(`Gym API running on http://localhost:${PORT}`);
+    });
+});
+
+
+testing
+curl -X POST http://localhost:3000/enrollments \
+-H "Content-Type: application/json" \
+-d '{"memberName": "Dave", "className": "Yoga", '
+curl -X POST http://localhost:3000/enrollments \
+-H "Content-Type: application/json" \
+-d '{"memberName": "Charlie", "className": "Pilates", "classDate": "2026-07-30"}'
+curl -X POST http://localhost:3000/enrollments \
+-H "Content-Type: application/json" \
+-d '{"memberName": "Bob", "className": "HIIT", "classDate": "2026-07-25"}'
+curl -X POST http://localhost:3000/enrollments \
+-H "Content-Type: application/json" \
+-d '{"memberName": "Alice", "className": "Yoga", "classDate": "2026-07-26"}'
+
