@@ -414,3 +414,247 @@ def remove_ticket(ticket_id: str):
     if not success:
         raise HTTPException(status_code=404, detail="Ticket not found")
     return {"status": "deleted", "ticket_id": ticket_id}
+
+
+
+# ==========================================
+# File: ticket_api/__init__.py
+# ==========================================
+"""
+FastAPI application module with SQLAlchemy integration.
+"""
+
+
+# ==========================================
+# File: ticket_api/database.py
+# ==========================================
+"""
+Database connection and session setup.
+"""
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, declarative_base
+
+# Using SQLite for simplicity. It will create a file named 'tickets.db' in your project root.
+SQLALCHEMY_DATABASE_URL = "sqlite:///./tickets.db"
+
+# connect_args={"check_same_thread": False} is needed only for SQLite
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
+)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+Base = declarative_base()
+
+
+# ==========================================
+# File: ticket_api/models.py
+# ==========================================
+"""
+SQLAlchemy ORM Models (defines the database tables).
+"""
+from sqlalchemy import Column, Integer, String, Float, Boolean
+from .database import Base
+
+class Ticket(Base):
+    __tablename__ = "tickets"
+
+    ticket_id = Column(String, primary_key=True, index=True)
+    customer_name = Column(String, index=True)
+    category = Column(String, index=True)
+    priority_raw = Column(String)
+    priority_score = Column(Integer)
+    created_at = Column(String)
+    sla_hours = Column(Float)
+    status = Column(String, default="open", index=True)
+    sla_breached = Column(Boolean, default=False, index=True)
+
+
+# ==========================================
+# File: ticket_api/schemas.py
+# ==========================================
+"""
+Pydantic schemas for API request/response validation.
+"""
+from pydantic import BaseModel, ConfigDict
+from typing import Optional
+
+class TicketBase(BaseModel):
+    ticket_id: str
+    customer_name: str
+    category: str
+    priority_raw: str
+    created_at: str
+    sla_hours: float
+    status: str = "open"
+
+class TicketCreate(TicketBase):
+    """Schema for creating a new ticket via POST."""
+    pass
+
+class TicketUpdate(BaseModel):
+    """Schema for updating an existing ticket via PUT."""
+    status: Optional[str] = None
+    priority_raw: Optional[str] = None
+
+class TicketResponse(TicketBase):
+    """Schema for serializing SQLAlchemy model back to JSON response."""
+    priority_score: int
+    sla_breached: bool
+    
+    # Allows Pydantic to read data from SQLAlchemy model attributes
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ==========================================
+# File: ticket_api/crud.py
+# ==========================================
+"""
+Reusable Database operation functions (Create, Read, Update, Delete).
+"""
+from sqlalchemy.orm import Session
+from . import models, schemas
+
+def get_ticket(db: Session, ticket_id: str):
+    return db.query(models.Ticket).filter(models.Ticket.ticket_id == ticket_id).first()
+
+def get_all_tickets(db: Session):
+    return db.query(models.Ticket).all()
+
+def get_breached_tickets(db: Session):
+    return db.query(models.Ticket).filter(models.Ticket.sla_breached == True).all()
+
+def create_ticket(db: Session, ticket: schemas.TicketCreate, priority_score: int):
+    # Convert Pydantic model to dict and create SQLAlchemy model
+    db_ticket = models.Ticket(
+        **ticket.model_dump(),
+        priority_score=priority_score,
+        sla_breached=False # Default to false for new entries
+    )
+    db.add(db_ticket)
+    db.commit()
+    db.refresh(db_ticket)
+    return db_ticket
+
+def update_ticket(db: Session, ticket_id: str, ticket_update: schemas.TicketUpdate):
+    db_ticket = get_ticket(db, ticket_id)
+    if not db_ticket:
+        return None
+
+    # Update only provided fields
+    update_data = ticket_update.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(db_ticket, key, value)
+    
+    # Recalculate priority score if priority_raw was updated
+    if "priority_raw" in update_data:
+        priority_map = {"low": 1, "medium": 2, "high": 3, "critical": 4}
+        db_ticket.priority_score = priority_map.get(db_ticket.priority_raw.lower(), db_ticket.priority_score)
+
+    db.commit()
+    db.refresh(db_ticket)
+    return db_ticket
+
+def delete_ticket(db: Session, ticket_id: str):
+    db_ticket = get_ticket(db, ticket_id)
+    if db_ticket:
+        db.delete(db_ticket)
+        db.commit()
+        return True
+    return False
+
+
+# ==========================================
+# File: ticket_api/main.py
+# ==========================================
+"""
+FastAPI application and routing using SQLAlchemy.
+"""
+import json
+import os
+import logging
+from fastapi import FastAPI, HTTPException, Depends
+from sqlalchemy.orm import Session
+from contextlib import asynccontextmanager
+
+from . import models, schemas, crud
+from .database import SessionLocal, engine
+
+logger = logging.getLogger(__name__)
+
+# Create the database tables
+models.Base.metadata.create_all(bind=engine)
+
+DATA_PATH = "data/tickets_report.json"
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan event to seed the SQLite DB from JSON report if it's empty."""
+    db = SessionLocal()
+    try:
+        if db.query(models.Ticket).count() == 0 and os.path.exists(DATA_PATH):
+            with open(DATA_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                tickets_list = data.get("tickets", [])
+                for t in tickets_list:
+                    db_ticket = models.Ticket(**t)
+                    db.add(db_ticket)
+                db.commit()
+                logger.info(f"Successfully seeded DB with {len(tickets_list)} tickets from JSON.")
+    except Exception as e:
+        logger.error(f"Error seeding database: {e}")
+    finally:
+        db.close()
+    yield
+
+app = FastAPI(title="NimbusTech Ticket Triage API (SQLAlchemy)", lifespan=lifespan)
+
+# Dependency to get the DB session per request
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+@app.get("/")
+def read_root():
+    return {"status": "ok", "service": "ticket-triage-api", "database": "sqlite"}
+
+@app.get("/tickets", response_model=list[schemas.TicketResponse])
+def get_tickets(db: Session = Depends(get_db)):
+    return crud.get_all_tickets(db)
+
+@app.get("/tickets/breached", response_model=list[schemas.TicketResponse])
+def get_breached_tickets(db: Session = Depends(get_db)):
+    return crud.get_breached_tickets(db)
+
+@app.get("/tickets/{ticket_id}", response_model=schemas.TicketResponse)
+def get_ticket_by_id(ticket_id: str, db: Session = Depends(get_db)):
+    ticket = crud.get_ticket(db, ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    return ticket
+
+@app.post("/tickets", response_model=schemas.TicketResponse)
+def create_ticket(ticket_in: schemas.TicketCreate, db: Session = Depends(get_db)):
+    if crud.get_ticket(db, ticket_in.ticket_id):
+        raise HTTPException(status_code=400, detail="Ticket with this ID already exists")
+    
+    priority_map = {"low": 1, "medium": 2, "high": 3, "critical": 4}
+    p_score = priority_map.get(ticket_in.priority_raw.lower(), 1)
+    
+    return crud.create_ticket(db, ticket_in, priority_score=p_score)
+
+@app.put("/tickets/{ticket_id}", response_model=schemas.TicketResponse)
+def update_ticket(ticket_id: str, ticket_in: schemas.TicketUpdate, db: Session = Depends(get_db)):
+    updated_ticket = crud.update_ticket(db, ticket_id, ticket_in)
+    if not updated_ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    return updated_ticket
+
+@app.delete("/tickets/{ticket_id}")
+def remove_ticket(ticket_id: str, db: Session = Depends(get_db)):
+    success = crud.delete_ticket(db, ticket_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    return {"status": "deleted", "ticket_id": ticket_id}
