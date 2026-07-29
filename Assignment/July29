@@ -273,6 +273,162 @@ def read_index():
 
         // Populate form for editing
         function editBook(id, title, author, genre, status) {
+<!-- ============================================================================== -->
+<!-- FILE: static/index.html                                                        -->
+<!-- ============================================================================== -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Book Catalog</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; max-width: 900px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ccc; padding: 10px; text-align: left; }
+        th { background-color: #f4f4f4; }
+        .form-container { margin-bottom: 20px; padding: 15px; border: 1px solid #ccc; background: #f9f9f9; }
+        .form-container input, .form-container select { padding: 5px; margin-right: 10px; margin-bottom: 10px; }
+        button { padding: 5px 10px; cursor: pointer; margin-right: 5px; }
+        .danger { background-color: #ff4c4c; color: white; border: none; }
+        .edit-btn { background-color: #4CAF50; color: white; border: none; }
+        .search-container { background: #eef; }
+    </style>
+</head>
+<body>
+
+    <h1>Book Catalog</h1>
+
+    <!-- Form for Adding / Editing a book -->
+    <div class="form-container">
+        <h3 id="form-title">Add a New Book</h3>
+        <input type="hidden" id="book-id">
+        <input type="text" id="title" placeholder="Title (Required)" required>
+        <input type="text" id="author" placeholder="Author (Required)" required>
+        <input type="text" id="genre" placeholder="Genre (Optional)">
+        <select id="status">
+            <option value="available">Available</option>
+            <option value="borrowed">Borrowed</option>
+        </select>
+        <button id="save-btn" onclick="saveBook()">Add Book</button>
+        <button onclick="resetForm()">Clear Form</button>
+    </div>
+
+    <!-- Form for searching a specific book by ID -->
+    <div class="form-container search-container">
+        <h3>Search Book by ID</h3>
+        <input type="number" id="search-id" placeholder="Enter Book ID">
+        <button onclick="searchBookById()">Search</button>
+        <button onclick="fetchBooks()">Reset List (Show All)</button>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Title</th>
+                <th>Author</th>
+                <th>Genre</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="book-list">
+            <!-- Books will be injected here via JavaScript -->
+        </tbody>
+    </table>
+
+    <script>
+        const API_URL = '/books';
+
+        // 1. Fetch and display all books
+        async function fetchBooks() {
+            const response = await fetch(API_URL);
+            const books = await response.json();
+            renderTable(books);
+        }
+
+        // 2. Fetch and display a single book by ID
+        async function searchBookById() {
+            const id = document.getElementById('search-id').value;
+            if (!id) {
+                alert('Please enter a valid Book ID.');
+                return;
+            }
+
+            const response = await fetch(`${API_URL}/${id}`);
+            
+            if (response.ok) {
+                const book = await response.json();
+                renderTable([book]); // Render as an array of one
+            } else if (response.status === 404) {
+                const tbody = document.getElementById('book-list');
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">Book not found</td></tr>';
+            } else {
+                alert('An error occurred.');
+            }
+        }
+
+        // Helper function to render the HTML table rows
+        function renderTable(books) {
+            const tbody = document.getElementById('book-list');
+            tbody.innerHTML = '';
+            
+            books.forEach(book => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${book.id}</td>
+                    <td>${book.title}</td>
+                    <td>${book.author}</td>
+                    <td>${book.genre || '-'}</td>
+                    <td>${book.status}</td>
+                    <td>
+                        <button class="edit-btn" onclick="editBook(${book.id}, '${book.title}', '${book.author}', '${book.genre || ''}', '${book.status}')">Edit</button>
+                        <button class="danger" onclick="deleteBook(${book.id})">Delete</button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        // 3. Save (Add or Update) Book
+        async function saveBook() {
+            const id = document.getElementById('book-id').value;
+            const title = document.getElementById('title').value;
+            const author = document.getElementById('author').value;
+            const genre = document.getElementById('genre').value;
+            const status = document.getElementById('status').value;
+
+            if (!title || !author) {
+                alert('Title and Author are required.');
+                return;
+            }
+
+            const bookData = { title, author, genre: genre || null, status };
+            let url = API_URL;
+            let method = 'POST';
+
+            if (id) {
+                url = `${API_URL}/${id}`;
+                method = 'PUT';
+            }
+
+            const response = await fetch(url, {
+                method: method,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(bookData)
+            });
+
+            if (response.ok) {
+                resetForm();
+                fetchBooks(); // Refresh table
+            } else {
+                alert('An error occurred.');
+            }
+        }
+
+        // 4. Populate form for editing
+        function editBook(id, title, author, genre, status) {
             document.getElementById('form-title').innerText = "Edit Book";
             document.getElementById('save-btn').innerText = "Update Book";
             document.getElementById('book-id').value = id;
@@ -282,15 +438,15 @@ def read_index():
             document.getElementById('status').value = status;
         }
 
-        // Delete Book
+        // 5. Delete Book
         async function deleteBook(id) {
             if (confirm('Are you sure you want to delete this book?')) {
                 await fetch(`${API_URL}/${id}`, { method: 'DELETE' });
-                fetchBooks();
+                fetchBooks(); // Refresh table
             }
         }
 
-        // Reset the form back to 'Add' state
+        // 6. Reset the form back to 'Add' state
         function resetForm() {
             document.getElementById('form-title').innerText = "Add a New Book";
             document.getElementById('save-btn').innerText = "Add Book";
@@ -299,9 +455,10 @@ def read_index():
             document.getElementById('author').value = "";
             document.getElementById('genre').value = "";
             document.getElementById('status').value = "available";
+            document.getElementById('search-id').value = ""; 
         }
 
-        // Initial fetch
+        // Initial fetch to load the grid
         fetchBooks();
     </script>
 </body>
