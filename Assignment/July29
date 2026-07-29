@@ -1,0 +1,308 @@
+# ==============================================================================
+# FILE: requirements.txt
+# (Place this in your root project folder)
+# ==============================================================================
+fastapi
+uvicorn
+sqlalchemy
+pydantic
+
+# ==============================================================================
+# FILE: database.py
+# (Place this in your root project folder)
+# ==============================================================================
+from sqlalchemy import create_engine
+from sqlalchemy.orm import declarative_base, sessionmaker
+
+# SQLite database setup
+SQLALCHEMY_DATABASE_URL = "sqlite:///./books.db"
+
+# check_same_thread=False is needed for SQLite in FastAPI
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
+)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+Base = declarative_base()
+
+# Dependency to get DB session
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+# ==============================================================================
+# FILE: models.py
+# (Place this in your root project folder)
+# ==============================================================================
+from sqlalchemy import Column, Integer, String, DateTime
+from datetime import datetime, timezone
+from database import Base
+
+class Book(Base):
+    __tablename__ = "books"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    title = Column(String, nullable=False)
+    author = Column(String, nullable=False)
+    genre = Column(String, nullable=True)
+    status = Column(String, default="available")
+    added_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+# ==============================================================================
+# FILE: schemas.py
+# (Place this in your root project folder)
+# ==============================================================================
+from pydantic import BaseModel
+from typing import Optional
+from datetime import datetime
+
+class BookBase(BaseModel):
+    title: str
+    author: str
+    genre: Optional[str] = None
+    status: Optional[str] = "available"
+
+class BookCreate(BookBase):
+    pass
+
+class BookUpdate(BaseModel):
+    title: Optional[str] = None
+    author: Optional[str] = None
+    genre: Optional[str] = None
+    status: Optional[str] = None
+
+class BookResponse(BookBase):
+    id: int
+    added_at: datetime
+
+    class Config:
+        from_attributes = True
+
+# ==============================================================================
+# FILE: main.py
+# (Place this in your root project folder)
+# ==============================================================================
+from fastapi import FastAPI, Depends, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from sqlalchemy.orm import Session
+from typing import List
+
+import models, schemas
+from database import engine, get_db
+
+# Create database tables
+models.Base.metadata.create_all(bind=engine)
+
+app = FastAPI(title="Book Catalog API")
+
+# API Endpoints
+@app.post("/books", response_model=schemas.BookResponse)
+def create_book(book: schemas.BookCreate, db: Session = Depends(get_db)):
+    db_book = models.Book(**book.model_dump())
+    db.add(db_book)
+    db.commit()
+    db.refresh(db_book)
+    return db_book
+
+@app.get("/books", response_model=List[schemas.BookResponse])
+def get_all_books(db: Session = Depends(get_db)):
+    books = db.query(models.Book).all()
+    return books
+
+@app.get("/books/{id}", response_model=schemas.BookResponse)
+def get_book(id: int, db: Session = Depends(get_db)):
+    book = db.query(models.Book).filter(models.Book.id == id).first()
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
+    return book
+
+@app.put("/books/{id}", response_model=schemas.BookResponse)
+def update_book(id: int, book_update: schemas.BookUpdate, db: Session = Depends(get_db)):
+    db_book = db.query(models.Book).filter(models.Book.id == id).first()
+    if not db_book:
+        raise HTTPException(status_code=404, detail="Book not found")
+    
+    update_data = book_update.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(db_book, key, value)
+        
+    db.commit()
+    db.refresh(db_book)
+    return db_book
+
+@app.delete("/books/{id}")
+def delete_book(id: int, db: Session = Depends(get_db)):
+    db_book = db.query(models.Book).filter(models.Book.id == id).first()
+    if not db_book:
+        raise HTTPException(status_code=404, detail="Book not found")
+    
+    db.delete(db_book)
+    db.commit()
+    return {"detail": "Book deleted successfully"}
+
+# Mount the static directory for serving the UI
+# Ensure you create a folder named 'static' in your root project directory
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+@app.get("/")
+def read_index():
+    return FileResponse("static/index.html")
+
+<!-- ============================================================================== -->
+<!-- FILE: static/index.html                                                        -->
+<!-- (Create a folder named 'static' in root, and place this file inside it)        -->
+<!-- ============================================================================== -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Book Catalog</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; max-width: 900px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ccc; padding: 10px; text-align: left; }
+        th { background-color: #f4f4f4; }
+        .form-container { margin-bottom: 20px; padding: 15px; border: 1px solid #ccc; background: #f9f9f9; }
+        .form-container input, .form-container select { padding: 5px; margin-right: 10px; margin-bottom: 10px; }
+        button { padding: 5px 10px; cursor: pointer; }
+        .danger { background-color: #ff4c4c; color: white; border: none; }
+        .edit-btn { background-color: #4CAF50; color: white; border: none; }
+    </style>
+</head>
+<body>
+
+    <h1>Book Catalog</h1>
+
+    <div class="form-container">
+        <h3 id="form-title">Add a New Book</h3>
+        <input type="hidden" id="book-id">
+        <input type="text" id="title" placeholder="Title (Required)" required>
+        <input type="text" id="author" placeholder="Author (Required)" required>
+        <input type="text" id="genre" placeholder="Genre (Optional)">
+        <select id="status">
+            <option value="available">Available</option>
+            <option value="borrowed">Borrowed</option>
+        </select>
+        <button id="save-btn" onclick="saveBook()">Add Book</button>
+        <button onclick="resetForm()">Clear Form</button>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Title</th>
+                <th>Author</th>
+                <th>Genre</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="book-list">
+            <!-- Books will be injected here via JavaScript -->
+        </tbody>
+    </table>
+
+    <script>
+        const API_URL = '/books';
+
+        // Fetch and display books
+        async function fetchBooks() {
+            const response = await fetch(API_URL);
+            const books = await response.json();
+            const tbody = document.getElementById('book-list');
+            tbody.innerHTML = '';
+            
+            books.forEach(book => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${book.id}</td>
+                    <td>${book.title}</td>
+                    <td>${book.author}</td>
+                    <td>${book.genre || '-'}</td>
+                    <td>${book.status}</td>
+                    <td>
+                        <button class="edit-btn" onclick="editBook(${book.id}, '${book.title}', '${book.author}', '${book.genre || ''}', '${book.status}')">Edit</button>
+                        <button class="danger" onclick="deleteBook(${book.id})">Delete</button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        // Save (Add or Update) Book
+        async function saveBook() {
+            const id = document.getElementById('book-id').value;
+            const title = document.getElementById('title').value;
+            const author = document.getElementById('author').value;
+            const genre = document.getElementById('genre').value;
+            const status = document.getElementById('status').value;
+
+            if (!title || !author) {
+                alert('Title and Author are required.');
+                return;
+            }
+
+            const bookData = { title, author, genre: genre || null, status };
+            let url = API_URL;
+            let method = 'POST';
+
+            if (id) {
+                url = `${API_URL}/${id}`;
+                method = 'PUT';
+            }
+
+            const response = await fetch(url, {
+                method: method,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(bookData)
+            });
+
+            if (response.ok) {
+                resetForm();
+                fetchBooks();
+            } else {
+                alert('An error occurred.');
+            }
+        }
+
+        // Populate form for editing
+        function editBook(id, title, author, genre, status) {
+            document.getElementById('form-title').innerText = "Edit Book";
+            document.getElementById('save-btn').innerText = "Update Book";
+            document.getElementById('book-id').value = id;
+            document.getElementById('title').value = title;
+            document.getElementById('author').value = author;
+            document.getElementById('genre').value = genre === 'null' ? '' : genre;
+            document.getElementById('status').value = status;
+        }
+
+        // Delete Book
+        async function deleteBook(id) {
+            if (confirm('Are you sure you want to delete this book?')) {
+                await fetch(`${API_URL}/${id}`, { method: 'DELETE' });
+                fetchBooks();
+            }
+        }
+
+        // Reset the form back to 'Add' state
+        function resetForm() {
+            document.getElementById('form-title').innerText = "Add a New Book";
+            document.getElementById('save-btn').innerText = "Add Book";
+            document.getElementById('book-id').value = "";
+            document.getElementById('title').value = "";
+            document.getElementById('author').value = "";
+            document.getElementById('genre').value = "";
+            document.getElementById('status').value = "available";
+        }
+
+        // Initial fetch
+        fetchBooks();
+    </script>
+</body>
+</html>
