@@ -1,0 +1,126 @@
+import logging
+from exceptions import TokenLimitExceededError, APICallError
+
+# Configure logging to show INFO and ERROR without standard print statements
+logging.basicConfig(level=logging.INFO, format='%(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+class AIConceptAdvisor:
+    def __init__(self, context_limit=2048):
+        self.context_limit = context_limit
+        self.system_prompt = (
+            "You are an AI assistant. Classify the user's question as being about "
+            "AI, ML, DL, or GenAI. Answer in under 100 words at a beginner level."
+        )
+
+    def estimate_tokens(self, text):
+        """
+        Gives an approximate token count for a prompt.
+        Uses a simple word-based heuristic (1 word ~= 1 token).
+        """
+        return len(text.split())
+
+    def _fallback_explanation(self):
+        """
+        Fallback conceptual explanation distinguishing AI, ML, DL, and GenAI.
+        """
+        return (
+            "Fallback Explanation: Artificial Intelligence (AI) is the broad concept of machines simulating human intelligence. "
+            "Machine Learning (ML) is a subset of AI using statistical methods to learn from data. "
+            "Deep Learning (DL) is a subset of ML powered by Artificial Neural Networks (ANNs) to process complex patterns. "
+            "Generative AI (GenAI) uses these neural networks to create brand new content like text or images."
+        )
+
+    def _mock_openai_call(self, prompt):
+        """
+        A stub/mock function representing the OpenAI/ChatGPT API call.
+        """
+        if "trigger_fail" in prompt.lower():
+            raise APICallError("Simulated API connection timeout.")
+        
+        return "Classification: GenAI.\nAnswer: Generative AI creates new, original content based on patterns it learned during training."
+
+    def ask_question(self, question):
+        """
+        Combines the system prompt and user question, checks tokens, and calls the mock API.
+        """
+        full_prompt = f"{self.system_prompt}\nUser Question: {question}"
+        estimated_tokens = self.estimate_tokens(full_prompt)
+        
+        logger.info(f"Prompt prepared. Estimated tokens: {estimated_tokens}")
+
+        try:
+            if estimated_tokens > self.context_limit:
+                raise TokenLimitExceededError(f"Estimated tokens ({estimated_tokens}) exceed limit of {self.context_limit}.")
+
+            logger.info("Sending request to LLM API...")
+            response = self._mock_openai_call(full_prompt)
+            logger.info("API call successful.")
+            return response
+
+        except TokenLimitExceededError as e:
+            logger.error(f"Token Limit Error: {e}")
+            return "Error: Your question is too long. Please shorten it."
+        except APICallError as e:
+            logger.error(f"API Error: {e}")
+            logger.info("Applying graceful fallback...")
+            return self._fallback_explanation()
+from advisor import AIConceptAdvisor
+
+def run_demonstration():
+    print("\n--- Running AI Concept Advisor Driver ---")
+    
+    # Initialize with an artificially low limit to demonstrate the token threshold
+    advisor = AIConceptAdvisor(context_limit=50) 
+    
+    questions = [
+        "What is the difference between ML and GenAI?", # Normal behavior
+        "trigger_fail What is an ANN?",                 # Simulates API failure
+        "What is AI? " * 50                             # Triggers token limit exception
+    ]
+
+    for i, q in enumerate(questions, 1):
+        print(f"\n[Question {i}]: {q[:40]}...")
+        answer = advisor.ask_question(q)
+        print(f"[Answer]:\n{answer}")
+        
+    print("-----------------------------------------\n")
+
+if __name__ == "__main__":
+    run_demonstration()
+import unittest
+from advisor import AIConceptAdvisor
+
+class TestAIConceptAdvisor(unittest.TestCase):
+    def setUp(self):
+        # Set up with a low limit to easily test the token threshold
+        self.advisor = AIConceptAdvisor(context_limit=30)
+
+    def test_normal_question_classification(self):
+        """Verify correct question formatting and mock response retrieval."""
+        response = self.advisor.ask_question("What is GenAI?")
+        self.assertIn("Classification: GenAI", response)
+        self.assertNotIn("Fallback", response)
+
+    def test_token_limit_exceeded(self):
+        """Verify that a deliberately oversized prompt is caught and handled."""
+        oversized_question = "Explain AI " * 40
+        response = self.advisor.ask_question(oversized_question)
+        self.assertEqual(response, "Error: Your question is too long. Please shorten it.")
+
+    def test_api_failure_fallback(self):
+        """Verify that an API failure gracefully returns the fallback conceptual explanation."""
+        response = self.advisor.ask_question("trigger_fail: tell me about ML.")
+        self.assertIn("Fallback Explanation:", response)
+        self.assertIn("Artificial Neural Networks (ANNs)", response)
+
+if __name__ == "__main__":
+    unittest.main()
+# AI Concept Advisor
+
+This module provides a robust OOP wrapper for querying an LLM about Artificial Intelligence concepts. 
+
+**Notes & Assumptions:**
+* **API Usage:** To ensure this runs entirely locally without paid access, the API call logic is mocked.
+* **Token Estimation:** A lightweight word-count heuristic is used to estimate tokens rather than relying on external libraries like `tiktoken`.
+* **Fallback:** The fallback logic directly answers the conceptual requirement of distinguishing AI/ML/DL/GenAI and defining ANNs in the event of an API failure.
