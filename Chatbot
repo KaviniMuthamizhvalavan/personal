@@ -1,0 +1,387 @@
+fastapi>=0.110.0
+uvicorn>=0.28.0
+sqlalchemy>=2.0.0
+pydantic>=2.0.0
+python-dotenv>=1.0.0
+httpx>=0.27.0
+jinja2>=3.1.0
+# Choose provider: groq, openrouter, or ollama
+LLM_PROVIDER=groq
+
+# Provider Keys & Endpoints
+GROQ_API_KEY=your_groq_api_key_here
+OPENROUTER_API_KEY=your_openrouter_api_key_here
+OLLAMA_BASE_URL=http://localhost:11434
+
+# Model Configuration
+MODEL_NAME=llama-3.3-70b-versatile
+
+# Database Configuration
+DATABASE_URL=sqlite:///./chat_history.db
+import os
+from dotenv import load_dotenv
+from sqlalchemy import create_engine
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+
+load_dotenv()
+
+SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./chat_history.db")
+
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
+)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+Base = declarative_base()
+
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+from datetime import datetime
+from sqlalchemy import Column, Float, Integer, String, Text, DateTime
+from database import Base
+
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(String(100), index=True, nullable=False)
+    user_message = Column(Text, nullable=False)
+    assistant_response = Column(Text, nullable=False)
+    model_name = Column(String(100), nullable=False)
+    provider = Column(String(50), nullable=False)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    response_time = Column(Float, nullable=False)
+import os
+import time
+from typing import Dict, List, Tuple
+from dotenv import load_dotenv
+import httpx
+
+load_dotenv()
+
+
+class LLMService:
+
+    def __init__(self):
+        self.default_provider = os.getenv("LLM_PROVIDER", "groq").lower()
+        self.default_model = os.getenv("MODEL_NAME", "llama-3.3-70b-versatile")
+        self.groq_api_key = os.getenv("GROQ_API_KEY", "")
+        self.openrouter_api_key = os.getenv("OPENROUTER_API_KEY", "")
+        self.ollama_base_url = os.getenv(
+            "OLLAMA_BASE_URL", "http://localhost:11434"
+        ).rstrip("/")
+
+    async def generate_response(
+        self,
+        messages: List[Dict[str, str]],
+        provider: str = None,
+        model: str = None,
+    ) -> Tuple[str, str, str, float]:
+        selected_provider = (provider or self.default_provider).lower()
+        selected_model = model or self.default_model
+
+        start_time = time.time()
+
+        if selected_provider == "groq":
+            response_text = await self._call_openai_compatible_api(
+                url="https://api.groq.com/openai/v1/chat/completions",
+                api_key=self.groq_api_key,
+                model=selected_model,
+                messages=messages,
+            )
+        elif selected_provider == "openrouter":
+            response_text = await self._call_openai_compatible_api(
+                url="https://openrouter.ai/api/v1/chat/completions",
+                api_key=self.openrouter_api_key,
+                model=selected_model,
+                messages=messages,
+            )
+        elif selected_provider == "ollama":
+            response_text = await self._call_ollama(
+                model=selected_model, messages=messages
+            )
+        else:
+            raise ValueError(f"Unsupported LLM provider: {selected_provider}")
+
+        elapsed_time = round(time.time() - start_time, 2)
+        return response_text, selected_provider, selected_model, elapsed_time
+
+    async def _call_openai_compatible_api(
+        self, url: str, api_key: str, model: str, messages: List[Dict[str, str]]
+    ) -> str:
+        if not api_key:
+            raise ValueError("API Key is missing for the selected provider.")
+
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {"model": model, "messages": messages, "temperature": 0.7}
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            res = await client.post(url, headers=headers, json=payload)
+            if res.status_code != 200:
+                raise Exception(f"API Error ({res.status_code}): {res.text}")
+            data = res.json()
+            return data["choices"][0]["message"]["content"]
+
+    async def _call_ollama(
+        self, model: str, messages: List[Dict[str, str]]
+    ) -> str:
+        url = f"{self.ollama_base_url}/api/chat"
+        payload = {"model": model, "messages": messages, "stream": False}
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            res = await client.post(url, json=payload)
+            if res.status_code != 200:
+                raise Exception(f"Ollama Error ({res.status_code}): {res.text}")
+            data = res.json()
+            return data["message"]["content"]
+
+
+llm_service = LLMService()
+from datetime import datetime
+from typing import List, Dict
+import os
+
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from sqlalchemy.orm import Session
+
+from database import Base, engine, get_db
+from llm_service import llm_service
+from models import ChatMessage
+from schemas import ChatRequest, ChatResponse, ConversationHistoryResponse, MessagePair
+
+# Initialize DB tables
+Base.metadata.create_all(bind=engine)
+
+app = FastAPI(title="Conversational AI Chatbot")
+
+# Mount Static and Template files
+app.mount("/static", StaticFiles(directory="static"), name="static")
+templates = Jinja2Templates(directory="templates")
+
+
+@app.get("/", response_class=HTMLResponse)
+async def serve_ui(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
+
+
+@app.get("/health")
+async def health_check():
+    return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
+
+
+@app.post("/chat", response_model=ChatResponse)
+async def chat(request_data: ChatRequest, db: Session = Depends(get_db)):
+    if not request_data.message.strip():
+        raise HTTPException(status_code=400, detail="Message cannot be empty.")
+
+    # 1. Fetch Conversation History to form memory
+    history_records = (
+        db.query(ChatMessage)
+        .filter(ChatMessage.conversation_id == request_data.conversation_id)
+        .order_by(ChatMessage.timestamp.asc())
+        .all()
+    )
+
+    formatted_messages: List[Dict[str, str]] = []
+    for msg in history_records:
+        formatted_messages.append({"role": "user", "content": msg.user_message})
+        formatted_messages.append({"role": "assistant", "content": msg.assistant_response})
+
+    # Append current message
+    formatted_messages.append({"role": "user", "content": request_data.message})
+
+    # 2. Call LLM Service
+    try:
+        response_text, provider, model_used, response_time = (
+            await llm_service.generate_response(
+                messages=formatted_messages,
+                provider=request_data.provider,
+                model=request_data.model,
+            )
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    now = datetime.utcnow()
+
+    # 3. Log to Database
+    db_record = ChatMessage(
+        conversation_id=request_data.conversation_id,
+        user_message=request_data.message,
+        assistant_response=response_text,
+        model_name=model_used,
+        provider=provider,
+        timestamp=now,
+        response_time=response_time,
+    )
+    db.add(db_record)
+    db.commit()
+
+    return ChatResponse(
+        conversation_id=request_data.conversation_id,
+        question=request_data.message,
+        response=response_text,
+        timestamp=now.isoformat(),
+        provider=provider,
+        model=model_used,
+        response_time=response_time,
+    )
+
+
+@app.get("/conversation/{conversation_id}", response_model=ConversationHistoryResponse)
+async def get_conversation(conversation_id: str, db: Session = Depends(get_db)):
+    records = (
+        db.query(ChatMessage)
+        .filter(ChatMessage.conversation_id == conversation_id)
+        .order_by(ChatMessage.timestamp.asc())
+        .all()
+    )
+
+    messages = [
+        MessagePair(user=record.user_message, assistant=record.assistant_response)
+        for record in records
+    ]
+
+    return ConversationHistoryResponse(
+        conversation_id=conversation_id, messages=messages
+    )
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Conversational Chatbot</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="chat-container">
+        <h2>AI Conversational Chatbot</h2>
+        <div id="chat-box" class="chat-box"></div>
+        <div class="input-area">
+            <input type="text" id="user-input" placeholder="Explain attention mechanism..." onkeydown="if(event.key==='Enter') sendMessage()">
+            <button onclick="sendMessage()">Send</button>
+        </div>
+    </div>
+
+    <script>
+        const conversationId = "conv_" + Math.floor(Math.random() * 100000);
+
+        async function sendMessage() {
+            const inputField = document.getElementById("user-input");
+            const message = inputField.value.trim();
+            if (!message) return;
+
+            const chatBox = document.getElementById("chat-box");
+
+            // Display user message
+            chatBox.innerHTML += `<div class="msg user"><b>User:</b> ${message}</div>`;
+            inputField.value = "";
+            chatBox.scrollTop = chatBox.scrollHeight;
+
+            try {
+                const response = await fetch("/chat", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ conversation_id: conversationId, message: message })
+                });
+
+                const data = await response.json();
+                if (response.ok) {
+                    chatBox.innerHTML += `<div class="msg ai"><b>AI:</b> ${data.response}</div>`;
+                } else {
+                    chatBox.innerHTML += `<div class="msg error"><b>Error:</b> ${data.detail}</div>`;
+                }
+            } catch (err) {
+                chatBox.innerHTML += `<div class="msg error"><b>Error:</b> Could not reach server.</div>`;
+            }
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+    </script>
+</body>
+</html>
+body {
+    font-family: Arial, sans-serif;
+    background-color: #f4f6f9;
+    display: flex;
+    justify-content: center;
+    padding-top: 40px;
+}
+
+.chat-container {
+    width: 500px;
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+    padding: 20px;
+}
+
+.chat-box {
+    height: 350px;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    padding: 10px;
+    overflow-y: auto;
+    margin-bottom: 15px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.msg {
+    padding: 8px 12px;
+    border-radius: 5px;
+    max-width: 80%;
+}
+
+.msg.user {
+    background-color: #e3f2fd;
+    align-self: flex-end;
+}
+
+.msg.ai {
+    background-color: #f1f8e9;
+    align-self: flex-start;
+}
+
+.msg.error {
+    background-color: #ffebee;
+    color: #c62828;
+}
+
+.input-area {
+    display: flex;
+    gap: 10px;
+}
+
+input {
+    flex: 1;
+    padding: 10px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+}
+
+button {
+    padding: 10px 20px;
+    background-color: #1976d2;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+button:hover {
+    background-color: #1565c0;
+}
