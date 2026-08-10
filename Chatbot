@@ -385,3 +385,33 @@ button {
 button:hover {
     background-color: #1565c0;
 }
+from datetime import datetime
+from typing import List, Optional
+from pydantic import BaseModel
+
+
+class ChatRequest(BaseModel):
+    conversation_id: str
+    message: str
+    provider: Optional[str] = None
+    model: Optional[str] = None
+
+
+class ChatResponse(BaseModel):
+    conversation_id: str
+    question: str
+    response: str
+    timestamp: str
+    provider: str
+    model: str
+    response_time: float
+
+
+class MessagePair(BaseModel):
+    user: str
+    assistant: str
+
+
+class ConversationHistoryResponse(BaseModel):
+    conversation_id: str
+    messages: List[MessagePair]
