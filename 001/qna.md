@@ -393,6 +393,15 @@ LLM outage and embedding-load fallback tests require backend setup or the existi
 How it's saved. When a user clicks a label on a course card, the frontend sends POST /feedback (backend/app/main.py:178). The backend rejects unknown course IDs with a 422. Otherwise it inserts one row into the feedback table of backend/feedback.sqlite3 (backend/app/feedback.py).
 
 What each row holds. It says which course was judged and, through the goal, goal_track and request_id fields, what the judgement was for:
+Column	Meaning
+course_id	The course being judged.
+label	One of relevant, not_relevant, too_advanced, too_basic, or already_learned. The database enforces this list.
+goal, goal_track	The goal the user typed and the track they chose. This is the query the label belongs to.
+known_skills, simulated_skills	The user's skill profile when they gave the feedback, stored as JSON.
+request_id	Links the label back to the specific recommendation response it came from.
+comment, created_at	Optional free text and a UTC timestamp.
+is_simulation	Marks labels given while using simulated skills, so they can be filtered out.
+data_version	The catalog build that was live, so a label can be traced to the data it was about.
 
 ┌────────────────────────────────┬───────────────────────────────────────────────────────────────────────────────────────────────────────────┐
 │             Column             │                                                  Meaning                                                  │
