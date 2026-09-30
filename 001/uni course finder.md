@@ -53,3 +53,6 @@ fallback table in qna too
 | **UI Styling**            | Plain CSS                     | Tailwind, Bootstrap, Material UI  | Provides design flexibility with minimal dependencies.                     |
 | **Testing**               | Pytest, FastAPI TestClient    | unittest, Postman                 | Enables automated API testing without running a separate server.           |
 | **Evaluation**            | Precision@5, MRR@5, F1        | nDCG, Recall@K                    | Measures recommendation relevance, ranking and skill-gap accuracy.         |
+
+
+<img width="734" height="293" alt="image" src="https://github.com/user-attachments/assets/1717a05c-0321-44cd-9467-ba450bc8cbc8" />
