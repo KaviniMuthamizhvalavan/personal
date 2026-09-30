@@ -393,6 +393,7 @@ LLM outage and embedding-load fallback tests require backend setup or the existi
 How it's saved. When a user clicks a label on a course card, the frontend sends POST /feedback (backend/app/main.py:178). The backend rejects unknown course IDs with a 422. Otherwise it inserts one row into the feedback table of backend/feedback.sqlite3 (backend/app/feedback.py).
 
 What each row holds. It says which course was judged and, through the goal, goal_track and request_id fields, what the judgement was for:
+
 Column	Meaning
 course_id	The course being judged.
 label	One of relevant, not_relevant, too_advanced, too_basic, or already_learned. The database enforces this list.
