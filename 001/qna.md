@@ -385,3 +385,46 @@ These are manual tests to run, not newly executed results. Clear old skill chips
 Also reuse test 3 with a restrictive combination of the available filters and check that results obey them. For an exact zero-match API test, send organization `No Such University`; this value may not be selectable in the UI's organization list. Expect no courses and a filter warning, rather than unrelated replacements.
 
 LLM outage and embedding-load fallback tests require backend setup or the existing mocked tests; a search-box phrase cannot reliably simulate infrastructure failure. Use [test_degraded.py](D:/coding/kavini/backend/tests/test_degraded.py) and [test_track_designer.py](D:/coding/kavini/backend/tests/test_track_designer.py) for those controlled cases.
+
+
+
+1. Feedback
+
+How it's saved. When a user clicks a label on a course card, the frontend sends POST /feedback (backend/app/main.py:178). The backend rejects unknown course IDs with a 422. Otherwise it inserts one row into the feedback table of backend/feedback.sqlite3 (backend/app/feedback.py).
+
+What each row holds. It says which course was judged and, through the goal, goal_track and request_id fields, what the judgement was for:
+
+┌────────────────────────────────┬───────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│             Column             │                                                  Meaning                                                  │
+├────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ course_id                      │ The course being judged.                                                                                  │
+├────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ label                          │ One of relevant, not_relevant, too_advanced, too_basic, already_learned. The database enforces this list. │
+├────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ goal, goal_track               │ The goal the user typed and the track they chose. This is the query the label belongs to.                 │
+├────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ known_skills, simulated_skills │ The user's skill profile when they gave the feedback, stored as JSON.                                     │
+├────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ request_id                     │ Links the label back to the specific recommendation response it came from.                                │
+├────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ comment, created_at            │ Optional free text, and a UTC timestamp.                                                                  │
+├────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ is_simulation                  │ Marks labels given while using simulated skills, so they can be filtered out.                             │
+├────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ data_version                   │ The catalog build that was live, so a label can be traced to the data it was about.                       │
+└────────────────────────────────┴───────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+So "relevant" always means relevant to that goal with that skill profile, not relevant in general.
+
+Is it used? No. It is stored and never read back. The docstring says so: "feedback never retrains ranking". The only reader is counts(), which totals the labels, and only the tests call it. It doesn't affect ranking and it isn't used in the Evaluation page. The evaluation uses the separate AI-made judgments file. The feedback table is a log for later analysis, for example to check whether labels agree with the ranking.
+
+2. SHA-256 hashing
+
+SHA-256 is a fingerprint function. It turns the raw bytes of a file into a 64-character string. Change one byte and the string changes completely. It hashes files, not individual courses. It is used in four places:
+
+1. The source CSV (fetch_inputs.py, prepare_data.py). fetch_inputs.py checks the downloaded coursera_course_2024.csv against a hardcoded hash and stops with "Do not build on this file" if they differ. This guarantees everyone builds from the exact same dataset. The evaluation numbers depend on that, because they are only reproducible on identical data.
+2. The built artifacts (build_index.py). After data processing, it hashes courses.json and course_ids.json and writes those hashes into manifest.json.
+3. Startup checks (catalog.py:85). When the app starts, it re-hashes those files and refuses to load if they don't match the manifest. This catches a hand-edited courses.json or a mix of files from different builds. That matters because the embedding matrix is matched to courses by row position. If the files drift apart, course A would silently get course B's vector and the recommendations would be wrong with no error.
+4. The data version and rule files. data_version is the first 8 characters of the CSV hash joined to the first 8 of the courses hash. That is the tag saved with each feedback row and shown in the report's "Catalog version". The skill alias and override files are hashed too, so the app can warn that the rules changed since the index was built.
+
+In short, it is an integrity and versioning check: it confirms that the data, the index and the evaluation results all come from the same build.
