@@ -27,6 +27,8 @@ User goal, skill chips and filters
 | `data/rules/course_prerequisites.json` | Reviewed prerequisites and their evidence. |
 | `data/rules/course_overrides.json` | Manual corrections to course data. |
 
+fallback table in qna too
+
 
 
 | Category                  | Technology Used               | Alternatives                      | Why Used                                                                   |
