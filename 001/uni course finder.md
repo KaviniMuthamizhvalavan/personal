@@ -13,7 +13,7 @@ User goal, skill chips and filters
     -> Fill the Honest Advisor templates
     -> Calculate Answer check values
     -> Return the response to the frontend
-
+```
 
 | File or area | Purpose |
 |---|---|
